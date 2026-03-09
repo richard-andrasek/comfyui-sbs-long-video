@@ -1,0 +1,347 @@
+{
+    "id": "311f0d67-1217-422e-94c4-5035de24c7e5",
+    "revision": 0,
+    "last_node_id": 3,
+    "last_link_id": 2,
+    "nodes": [
+        {
+            "id": 2,
+            "type": "StereoVideoConvert",
+            "pos": [
+                -382.7969386506145,
+                -330.8939241943518
+            ],
+            "size": [
+                187.41666412353516,
+                46
+            ],
+            "flags": {},
+            "order": 0,
+            "mode": 0,
+            "inputs": [
+                {
+                    "localized_name": "video_job",
+                    "name": "video_job",
+                    "type": "STEREO_VIDEO_JOB",
+                    "link": 2
+                }
+            ],
+            "outputs": [
+                {
+                    "localized_name": "rendered_video",
+                    "name": "rendered_video",
+                    "type": "STEREO_VIDEO_RENDER",
+                    "links": [
+                        1
+                    ]
+                },
+                {
+                    "localized_name": "summary",
+                    "name": "summary",
+                    "type": "STRING",
+                    "links": null
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "StereoVideoConvert"
+            }
+        },
+        {
+            "id": 3,
+            "type": "StereoVideoSource",
+            "pos": [
+                -809.4962009960831,
+                -326.4858373150407
+            ],
+            "size": [
+                328.75,
+                510
+            ],
+            "flags": {},
+            "order": 1,
+            "mode": 0,
+            "inputs": [
+                {
+                    "localized_name": "source_video",
+                    "name": "source_video",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "source_video"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "stereo_layout",
+                    "name": "stereo_layout",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "stereo_layout"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "use_depth_video",
+                    "name": "use_depth_video",
+                    "type": "BOOLEAN",
+                    "widget": {
+                        "name": "use_depth_video"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "depth_video",
+                    "name": "depth_video",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "depth_video"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "depth_model",
+                    "name": "depth_model",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "depth_model"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "depth_use_source_resolution",
+                    "name": "depth_use_source_resolution",
+                    "type": "BOOLEAN",
+                    "widget": {
+                        "name": "depth_use_source_resolution"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "depth_inference_resolution",
+                    "name": "depth_inference_resolution",
+                    "type": "INT",
+                    "widget": {
+                        "name": "depth_inference_resolution"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "start_frame",
+                    "name": "start_frame",
+                    "type": "INT",
+                    "widget": {
+                        "name": "start_frame"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "end_frame",
+                    "name": "end_frame",
+                    "type": "INT",
+                    "widget": {
+                        "name": "end_frame"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "every_nth",
+                    "name": "every_nth",
+                    "type": "INT",
+                    "widget": {
+                        "name": "every_nth"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "chunk_size",
+                    "name": "chunk_size",
+                    "type": "INT",
+                    "widget": {
+                        "name": "chunk_size"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "disparity_ratio",
+                    "name": "disparity_ratio",
+                    "type": "FLOAT",
+                    "widget": {
+                        "name": "disparity_ratio"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "disparity_px",
+                    "name": "disparity_px",
+                    "type": "FLOAT",
+                    "widget": {
+                        "name": "disparity_px"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "depth_power",
+                    "name": "depth_power",
+                    "type": "FLOAT",
+                    "widget": {
+                        "name": "depth_power"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "invert_depth",
+                    "name": "invert_depth",
+                    "type": "BOOLEAN",
+                    "widget": {
+                        "name": "invert_depth"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "audio_mode",
+                    "name": "audio_mode",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "audio_mode"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "spill_policy",
+                    "name": "spill_policy",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "spill_policy"
+                    },
+                    "link": null
+                }
+            ],
+            "outputs": [
+                {
+                    "localized_name": "video_job",
+                    "name": "video_job",
+                    "type": "STEREO_VIDEO_JOB",
+                    "links": [
+                        2
+                    ]
+                },
+                {
+                    "localized_name": "summary",
+                    "name": "summary",
+                    "type": "STRING",
+                    "links": null
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "StereoVideoSource"
+            },
+            "widgets_values": [
+                "dolphin.mp4",
+                "sbs",
+                false,
+                "dolphin.mp4",
+                "da3_small",
+                true,
+                512,
+                0,
+                0,
+                1,
+                4,
+                0.011458333333333333,
+                12,
+                0.3,
+                true,
+                "copy",
+                "auto",
+                "upload",
+                "upload"
+            ]
+        },
+        {
+            "id": 1,
+            "type": "StereoVideoMuxOutput",
+            "pos": [
+                -82.35684801682014,
+                -330.8372332439608
+            ],
+            "size": [
+                270,
+                82
+            ],
+            "flags": {},
+            "order": 2,
+            "mode": 0,
+            "inputs": [
+                {
+                    "localized_name": "rendered_video",
+                    "name": "rendered_video",
+                    "type": "STEREO_VIDEO_RENDER",
+                    "link": 1
+                },
+                {
+                    "localized_name": "filename_prefix",
+                    "name": "filename_prefix",
+                    "type": "STRING",
+                    "widget": {
+                        "name": "filename_prefix"
+                    },
+                    "link": null
+                },
+                {
+                    "localized_name": "output_format",
+                    "name": "output_format",
+                    "type": "COMBO",
+                    "widget": {
+                        "name": "output_format"
+                    },
+                    "link": null
+                }
+            ],
+            "outputs": [
+                {
+                    "localized_name": "output_path",
+                    "name": "output_path",
+                    "type": "STRING",
+                    "links": null
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "StereoVideoMuxOutput"
+            },
+            "widgets_values": [
+                "stereo_output",
+                "mp4"
+            ]
+        }
+    ],
+    "links": [
+        [
+            1,
+            2,
+            0,
+            1,
+            0,
+            "STEREO_VIDEO_RENDER"
+        ],
+        [
+            2,
+            3,
+            0,
+            2,
+            0,
+            "STEREO_VIDEO_JOB"
+        ]
+    ],
+    "groups": [],
+    "config": {},
+    "extra": {
+        "workflowRendererVersion": "LG",
+        "ds": {
+            "scale": 1.2100000000000006,
+            "offset": [
+                1107.4591680065323,
+                644.3652991004377
+            ]
+        }
+    },
+    "version": 0.4
+}
