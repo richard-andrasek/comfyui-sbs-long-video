@@ -301,6 +301,7 @@ class StereoVideoMuxOutput:
                 audio_start_seconds=render.audio_start_seconds,
                 audio_duration_seconds=render.audio_duration_seconds,
                 audio_mode=render.audio_mode,
+                stereo_layout=render.stereo_layout,
             )
         finally:
             cleanup_temp_dir(render.cleanup_dir)

@@ -84,6 +84,12 @@ class StreamingVideoEncoder:
                 raise RuntimeError(f"ffmpeg encode failed: {stderr.strip()}")
 
 
+def _stereo_metadata_args(layout: str) -> list[str]:
+    """FFmpeg metadata for YouTube 3D recognition. layout is 'sbs' or 'top_bottom'."""
+    mode = "left_right" if layout == "sbs" else "top_bottom"
+    return ["-metadata:s:v:0", f"stereo_mode={mode}"]
+
+
 def finalize_mux(
     rendered_video_path: str,
     output_path: str,
@@ -92,7 +98,9 @@ def finalize_mux(
     audio_duration_seconds: float,
     audio_mode: str,
     audio_codec: str = DEFAULTS.audio_codec,
+    stereo_layout: str = "sbs",
 ) -> str:
+    stereo_meta = _stereo_metadata_args(stereo_layout)
     if audio_mode == "none" or not audio_source_path:
         command = [
             ffmpeg_path(),
@@ -101,6 +109,7 @@ def finalize_mux(
             rendered_video_path,
             "-c",
             "copy",
+            *stereo_meta,
             output_path,
         ]
         completed = subprocess.run(command, capture_output=True, text=True)
@@ -127,6 +136,7 @@ def finalize_mux(
         "copy",
         "-c:a",
         audio_codec,
+        *stereo_meta,
         "-shortest",
         output_path,
     ]
