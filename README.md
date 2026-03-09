@@ -1,6 +1,6 @@
 # ComfyUI Stereo Long Video
 
-`ComfyUI Stereo Long Video` is a video-first custom node package for converting flat video into stereoscopic output inside ComfyUI.
+`ComfyUI Stereo Long Video` is a video-first custom node package for converting flat video into 3D stereoscopic output inside ComfyUI. Using the Depth Anything 3 AI model for depth estimation on a monocular input video. Resulting in a SBS or top/bottom stereo video that can be used on 3D displays. 
 
 Instead of pushing long clips through image-batch workflows, this project treats video as a stream:
 
@@ -29,6 +29,8 @@ Most 2D-to-3D video workflows either process video as large image batches or rel
 This project targets a different use case: a memory-efficient SBS video converter for ComfyUI that can still run on low VRAM and RAM machines. It decodes video in chunks, runs per-frame depth estimation with Depth Anything, renders stereo on the GPU, and streams frames into the encoder instead of keeping the whole clip in memory.
 
 That design involves a tradeoff. Video-oriented depth models can deliver stronger temporal consistency, but they often demand more VRAM for higher-resolution inputs. This project instead prioritizes practical long-video conversion on modest hardware while still producing useful depth estimation and stereo output for higher-resolution material.
+
+A central goal was to implement GPU-based image processing for the heavy lifting so that conversion runs many times faster than CPU-bound alternatives. In practice, the pipeline works like this: **FFmpeg** decodes the source video in configurable chunks and feeds raw frames into the pipeline. Each chunk is moved to the GPU once; **Depth Anything** runs depth inference there. The **stereo reprojection** step then runs entirely on the GPU: depth is turned into per-pixel disparity, and left/right views are generated with `torch.grid_sample` (bilinear sampling). Hole-filling for disoccluded regions uses GPU `avg_pool2d` iterations. The resulting stereo frames are streamed straight into an **ffmpeg** encoder process via a pipe, so only one chunk lives in memory at a time. By keeping decode → depth → render → encode in a single streaming loop and doing all per-frame image work on the GPU, the converter avoids CPU-bound warping.
 
 ## Installation
 
