@@ -16,8 +16,6 @@ class StereoVideoJob:
     height: int
     source_fps: float
     target_fps: float
-    start_frame: int
-    end_frame: int
     every_nth: int
     audio_mode: str
     stereo_layout: str

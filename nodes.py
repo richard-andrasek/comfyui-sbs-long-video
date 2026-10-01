@@ -20,7 +20,7 @@ try:
         list_input_videos,
         probe_video,
         resolve_output_prefix,
-        select_video_range,
+        select_video_spec,
     )
 except ImportError:
     from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
@@ -35,7 +35,7 @@ except ImportError:
         list_input_videos,
         probe_video,
         resolve_output_prefix,
-        select_video_range,
+        select_video_spec,
     )
 
 try:
@@ -67,12 +67,10 @@ class StereoVideoSource:
                 "source_video": (input_videos if input_videos else ["none"], {"tooltip": "Main input clip to convert into stereo."}),
                 "stereo_layout": (["sbs", "top_bottom"], {"default": "sbs", "tooltip": "Stereo arrangement for the output video."}),
                 "use_depth_video": ("BOOLEAN", {"default": False, "tooltip": "Use an uploaded depth reference clip instead of estimating depth automatically."}),
-                "depth_video": (optional_videos, {"tooltip": "Optional external depth video. It must match the selected source range in frame count when enabled."}),
+                "depth_video": (optional_videos, {"tooltip": "Optional external depth video. It must match the source clip in frame count when enabled."}),
                 "depth_model": (["da3_small", "da3_base", "da3_large"], {"default": "da3_small", "tooltip": "Depth model size used when automatic depth estimation is enabled."}),
                 "depth_use_source_resolution": ("BOOLEAN", {"default": True, "tooltip": "Run depth inference at the video's original frame resolution instead of a manual lower resolution."}),
                 "depth_inference_resolution": ("INT", {"default": DEFAULTS.depth_inference_size, "min": 128, "max": 2048, "tooltip": "Manual longest-side resolution for depth inference when source-resolution mode is off."}),
-                "start_frame": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "First source frame to process."}),
-                "end_frame": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "Last frame boundary to process. 0 means use the rest of the clip."}),
                 "every_nth": ("INT", {"default": 1, "min": 1, "tooltip": "Frame skipping factor. Higher values render faster previews and lower the output FPS."}),
                 "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM."}),
                 "disparity_ratio": ("FLOAT", {"default": DEFAULTS.disparity_ratio, "min": 0.0, "max": 0.25, "step": 0.0005, "tooltip": "Stereo separation as a fraction of image width. This keeps the 3D strength more consistent across different resolutions."}),
@@ -121,8 +119,6 @@ class StereoVideoSource:
         use_depth_video: bool,
         depth_model: str,
         depth_use_source_resolution: bool,
-        start_frame: int,
-        end_frame: int,
         every_nth: int,
         chunk_size: int,
         depth_inference_resolution: int,
@@ -140,7 +136,7 @@ class StereoVideoSource:
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
         metadata = probe_video(source_video)
-        spec = select_video_range(metadata, start_frame=start_frame, end_frame=end_frame, every_nth=every_nth)
+        spec = select_video_spec(metadata, every_nth=every_nth)
 
         depth_mode = "external_depth_video" if use_depth_video else "depth_anything_v3"
         depth_path: Optional[str] = None
@@ -148,7 +144,7 @@ class StereoVideoSource:
             if not depth_video or depth_video == "none":
                 raise ValueError("Select a depth video when depth_mode is external_depth_video")
             depth_metadata = probe_video(depth_video)
-            depth_spec = select_video_range(depth_metadata, start_frame=start_frame, end_frame=end_frame, every_nth=every_nth)
+            depth_spec = select_video_spec(depth_metadata, every_nth=every_nth)
             if depth_spec.selected_frame_count != spec.selected_frame_count:
                 raise ValueError("Depth video selection does not match source frame count")
             depth_path = depth_metadata.path
@@ -159,8 +155,6 @@ class StereoVideoSource:
             height=metadata.height,
             source_fps=metadata.fps,
             target_fps=spec.target_fps,
-            start_frame=spec.start_frame,
-            end_frame=spec.end_frame,
             every_nth=spec.every_nth,
             audio_mode=audio_mode,
             stereo_layout=stereo_layout,
@@ -202,10 +196,8 @@ class StereoVideoConvert:
 
     def convert(self, video_job):
         job = StereoVideoJob.from_handle(video_job)
-        spec = select_video_range(
+        spec = select_video_spec(
             probe_video(job.source_video_path),
-            start_frame=job.start_frame,
-            end_frame=job.end_frame,
             every_nth=job.every_nth,
         )
 
@@ -229,10 +221,8 @@ class StereoVideoConvert:
                 source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=job.chunk_size))
                 depth_decoder = None
                 if job.depth_mode == "external_depth_video":
-                    depth_spec = select_video_range(
+                    depth_spec = select_video_spec(
                         probe_video(job.depth_video_path),
-                        start_frame=job.start_frame,
-                        end_frame=job.end_frame,
                         every_nth=job.every_nth,
                     )
                     depth_decoder = stack.enter_context(FFmpegChunkDecoder(depth_spec, chunk_size=job.chunk_size))
@@ -282,7 +272,7 @@ class StereoVideoConvert:
         render = StereoVideoRender(
             temp_video_path=temp_video_path,
             audio_source_path=job.source_video_path if job.audio_mode == "copy" else None,
-            audio_start_seconds=spec.start_seconds,
+            audio_start_seconds=0.0,
             audio_duration_seconds=spec.selected_duration_seconds,
             audio_mode=job.audio_mode,
             cleanup_dir=temp_dir,

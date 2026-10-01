@@ -125,24 +125,6 @@
                     "link": null
                 },
                 {
-                    "localized_name": "start_frame",
-                    "name": "start_frame",
-                    "type": "INT",
-                    "widget": {
-                        "name": "start_frame"
-                    },
-                    "link": null
-                },
-                {
-                    "localized_name": "end_frame",
-                    "name": "end_frame",
-                    "type": "INT",
-                    "widget": {
-                        "name": "end_frame"
-                    },
-                    "link": null
-                },
-                {
                     "localized_name": "every_nth",
                     "name": "every_nth",
                     "type": "INT",
