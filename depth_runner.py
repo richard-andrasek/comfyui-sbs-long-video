@@ -23,6 +23,69 @@ HF_MODEL_CANDIDATES = {
     "da3_large": ["depth-anything/Depth-Anything-V2-Large-hf"],
 }
 
+def refine_depth_edges(
+    frames_bchw: torch.Tensor,
+    depth_b1hw: torch.Tensor,
+    radius: int = 2,
+    edge_strength: float = 8.0,
+) -> torch.Tensor:
+    """
+    Edge-aware depth smoothing.
+
+    Smooths depth locally, but reduces smoothing across strong RGB edges.
+    """
+
+    if radius <= 0:
+        return depth_b1hw
+
+    # Make sure RGB and depth are on the same device.
+    frames_bchw = frames_bchw.to(
+        device=depth_b1hw.device,
+        dtype=depth_b1hw.dtype,
+    )
+
+    k = radius * 2 + 1
+
+    gray = (
+        frames_bchw[:, 0:1] * 0.299
+        + frames_bchw[:, 1:2] * 0.587
+        + frames_bchw[:, 2:3] * 0.114
+    )
+
+    local_mean = F.avg_pool2d(
+        gray,
+        kernel_size=k,
+        stride=1,
+        padding=radius,
+    )
+
+    local_sq_mean = F.avg_pool2d(
+        gray * gray,
+        kernel_size=k,
+        stride=1,
+        padding=radius,
+    )
+
+    local_variance = (
+        local_sq_mean - local_mean * local_mean
+    ).clamp_min(0.0)
+
+    edge_weight = torch.exp(-edge_strength * local_variance)
+
+    depth_mean = F.avg_pool2d(
+        depth_b1hw,
+        kernel_size=k,
+        stride=1,
+        padding=radius,
+    )
+
+    refined = (
+        depth_b1hw * edge_weight
+        + depth_mean * (1.0 - edge_weight)
+    )
+
+    return refined.clamp(0.0, 1.0)
+
 
 class DepthAnythingRunner:
     def __init__(
@@ -124,13 +187,27 @@ class DepthAnythingRunner:
         self.load()
         original_size = frames_bchw.shape[-2:]
         inference_frames = self._prepare_inference_frames(frames_bchw)
+
         if self._api_backend is not None:
             depth = self._infer_official_api(inference_frames, invert_depth=invert_depth)
         elif self._pipeline is not None:
             depth = self._infer_pipeline(inference_frames, invert_depth=invert_depth)
         else:
             depth = self._infer_model(inference_frames, invert_depth=invert_depth)
-        return self._restore_depth_size(depth, original_size)
+
+        #return self._restore_depth_size(depth, original_size)
+
+        depth = self._restore_depth_size(depth, original_size)
+
+        depth = refine_depth_edges(
+            frames_bchw=frames_bchw,
+            depth_b1hw=depth,
+            radius=2,
+            edge_strength=8.0,
+        )
+
+        return depth
+        
 
     def _prepare_inference_frames(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         if not self.inference_resolution:

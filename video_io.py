@@ -264,8 +264,8 @@ class FFmpegChunkDecoder:
             "rawvideo",
             "-pix_fmt",
             self.pixel_format,
-            "-vsync",
-            "0",
+            "-fps_mode",
+            "passthrough",
             "pipe:1",
         ]
 
