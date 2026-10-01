@@ -137,7 +137,6 @@ Builds the video job definition.
 - `depth_power`: depth response curve before reprojection
 - `invert_depth`: flips the inferred or provided depth map
 - `audio_mode`: `copy` or `none`
-- `spill_policy`: reserved for future workflow or memory policy changes
 
 ### StereoVideoConvert
 

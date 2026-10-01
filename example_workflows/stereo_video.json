@@ -204,15 +204,6 @@
                         "name": "audio_mode"
                     },
                     "link": null
-                },
-                {
-                    "localized_name": "spill_policy",
-                    "name": "spill_policy",
-                    "type": "COMBO",
-                    "widget": {
-                        "name": "spill_policy"
-                    },
-                    "link": null
                 }
             ],
             "outputs": [

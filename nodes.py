@@ -80,7 +80,6 @@ class StereoVideoSource:
                 "depth_power": ("FLOAT", {"default": 0.30, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
-                "spill_policy": (["auto", "memory_only", "spill_to_temp", "debug_keep_frames"], {"default": "auto", "tooltip": "Reserved workflow/memory policy setting. The current pipeline does not materially change behavior based on this yet."}),
                 "depth_edge_refine_method": (
                     ["none", "simple", "fgs"],
                     {
@@ -132,7 +131,6 @@ class StereoVideoSource:
         depth_power: float,
         invert_depth: bool,
         audio_mode: str,
-        spill_policy: str,
         depth_video: str = "none",
         depth_edge_refine_method: str = "none",
         depth_edge_radius: int = 2,
@@ -179,7 +177,6 @@ class StereoVideoSource:
             disparity_ratio=disparity_ratio,
             depth_power=depth_power,
             invert_depth=invert_depth,
-            spill_policy=spill_policy,
             temp_dir=None,
             frame_count=spec.selected_frame_count,
             source_duration=spec.selected_duration_seconds,

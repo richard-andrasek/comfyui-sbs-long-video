@@ -34,8 +34,9 @@ not hard requirements.  The pipeline with its basic settings works quite well, b
 
 Currently, we're using custom nodes for EVERY ASPECT of this pipeline.  That's fine, except it's not.
 
-Instead, we need to be able to integrate with other existing nodes, such as VHS.  We can keep the Mux Output
-node, or whatever, but we should be using more standard pipeline, rather than have EVERY SINGLE THING custom.
+Instead, we need to be able to integrate with other existing nodes, such as VHS or DepthAntyhing V3.  
+We can keep the Mux Output node, or whatever, but we should be using more standard pipeline, 
+rather than have EVERY SINGLE THING custom.
 
 ### Joint bilateral edge refinement
 
@@ -153,3 +154,49 @@ background.
 
 A useful implementation would probably combine connected-component/area tests with
 local depth statistics rather than relying solely on object size.
+
+
+## Other Possible Improvements:
+
+These are some concepts from SBSCrafter:
+https://github.com/cnkanwei/ComfyUI-SBSCrafter
+
+### Softmax splatting / depth-aware forward warp
+
+Replace or augment `grid_sample` with depth-aware forward warping so overlapping pixels
+are resolved according to depth, improving occlusion handling and stereo boundaries.
+
+### Depth-adaptive blend radius
+
+Adjust hole/blend feathering based on scene depth rather than using a fixed radius, which
+can produce cleaner transitions around foreground objects and disocclusions.
+
+### Reinhard-style ring color matching
+
+Match the color characteristics of filled regions to the surrounding image, reducing
+visible seams caused by differences in brightness, contrast, or color.
+
+### small_hole_px
+
+Detect small reprojection holes and cracks separately from larger disocclusions, allowing
+them to be filled cheaply without invoking more expensive processing.
+
+### keep_original_left/right
+
+Keep one eye pixel-exact and synthesize only the other eye, reducing processing and
+avoiding unnecessary interpolation artifacts in the preserved view.
+
+### Auto-convergence / zero-parallax calculation
+
+Automatically determine a suitable reference depth plane so that the stereo image has
+consistent convergence without requiring manual adjustment for every scene.
+
+### Resolution-independent disparity (Percentage based, rather than pixel-based)
+
+Express stereo separation as a percentage of image width so the same setting produces
+consistent stereo strength across different output resolutions.
+
+### Particle Depth Fix
+
+Detect small isolated objects such as rain, snow, or dust that receive implausible
+foreground depth and replace them with an estimate of the surrounding background depth.

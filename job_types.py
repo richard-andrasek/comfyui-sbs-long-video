@@ -33,7 +33,6 @@ class StereoVideoJob:
     disparity_px: float
     depth_power: float
     invert_depth: bool
-    spill_policy: str
     disparity_ratio: float = 0.0
     temp_dir: Optional[str] = None
     frame_count: int = 0
