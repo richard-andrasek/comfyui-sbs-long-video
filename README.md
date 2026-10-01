@@ -130,7 +130,7 @@ Builds the video job definition.
 - `depth_inference_resolution`: manual inference size when source-resolution mode is disabled
 - `preview_run`: when enabled, processes every 30th frame for a quick preview
 - `chunk_size`: frames processed per chunk
-- `disparity_ratio`: stereo separation as a fraction of image width
+- `disparity_percent`: stereo separation as a percentage of image width (for example, `1.5` for 1.5%)
 - `depth_power`: depth response curve before reprojection
 - `invert_depth`: flips the inferred or provided depth map
 - `audio_mode`: `copy` or `none`

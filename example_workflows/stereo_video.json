@@ -143,11 +143,11 @@
                     "link": null
                 },
                 {
-                    "localized_name": "disparity_ratio",
-                    "name": "disparity_ratio",
+                    "localized_name": "disparity_percent",
+                    "name": "disparity_percent",
                     "type": "FLOAT",
                     "widget": {
-                        "name": "disparity_ratio"
+                        "name": "disparity_percent"
                     },
                     "link": null
                 },
@@ -210,7 +210,7 @@
                 0,
                 1,
                 4,
-                0.011458333333333333,
+                1.15,
                 0.3,
                 true,
                 "copy",
