@@ -81,6 +81,32 @@ class StereoVideoSource:
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
                 "spill_policy": (["auto", "memory_only", "spill_to_temp", "debug_keep_frames"], {"default": "auto", "tooltip": "Reserved workflow/memory policy setting. The current pipeline does not materially change behavior based on this yet."}),
+                "depth_edge_refine": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Refine depth boundaries using RGB image edges before stereo reprojection.",
+                    },
+                ),
+                "depth_edge_radius": (
+                    "INT",
+                    {
+                        "default": 2,
+                        "min": 1,
+                        "max": 16,
+                        "tooltip": "Radius of the edge-aware depth refinement neighborhood.",
+                    },
+                ),
+                "depth_edge_strength": (
+                    "FLOAT",
+                    {
+                        "default": 8.0,
+                        "min": 0.1,
+                        "max": 100.0,
+                        "step": 0.5,
+                        "tooltip": "Strength of RGB-edge protection during depth refinement.",
+                    },
+                ),
             },
         }
 
@@ -108,6 +134,9 @@ class StereoVideoSource:
         audio_mode: str,
         spill_policy: str,
         depth_video: str = "none",
+        depth_edge_refine: bool = False,
+        depth_edge_radius: int = 2,
+        depth_edge_strength: float = 8.0,
     ):
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
@@ -142,6 +171,9 @@ class StereoVideoSource:
             depth_model=depth_model,
             depth_use_source_resolution=depth_use_source_resolution,
             depth_inference_resolution=depth_inference_resolution,
+            depth_edge_refine=depth_edge_refine,
+            depth_edge_radius=depth_edge_radius,
+            depth_edge_strength=depth_edge_strength,
             chunk_size=chunk_size,
             disparity_px=disparity_px,
             disparity_ratio=disparity_ratio,
@@ -220,7 +252,13 @@ class StereoVideoConvert:
                 for source_chunk in source_decoder:
                     frames = torch.from_numpy(source_chunk).float() / 255.0
                     if job.depth_mode == "depth_anything_v3":
-                        depth = runner.infer(frames.permute(0, 3, 1, 2), invert_depth=job.invert_depth)
+                        depth = runner.infer(
+                            frames.permute(0, 3, 1, 2),
+                            invert_depth=job.invert_depth,
+                            edge_refine=job.depth_edge_refine,
+                            edge_radius=job.depth_edge_radius,
+                            edge_strength=job.depth_edge_strength,
+                        )
                     else:
                         try:
                             depth_chunk = next(depth_iter)

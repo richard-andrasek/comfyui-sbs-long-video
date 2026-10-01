@@ -27,41 +27,45 @@ def refine_depth_edges(
     frames_bchw: torch.Tensor,
     depth_b1hw: torch.Tensor,
     radius: int = 2,
-    edge_strength: float = 8.0,
+    strength: float = 8.0,
 ) -> torch.Tensor:
     """
     Edge-aware depth smoothing.
 
-    Smooths depth locally, but reduces smoothing across strong RGB edges.
-    """
+    Smooths depth locally while reducing smoothing across strong RGB edges.
 
-    if radius <= 0:
+    frames_bchw: [B, 3, H, W], RGB in [0, 1]
+    depth_b1hw:  [B, 1, H, W], normalized depth in [0, 1]
+    """
+    if radius <= 0 or strength <= 0:
         return depth_b1hw
 
-    # Make sure RGB and depth are on the same device.
+    # Keep RGB and depth on the same device/dtype.
     frames_bchw = frames_bchw.to(
         device=depth_b1hw.device,
         dtype=depth_b1hw.dtype,
     )
 
-    k = radius * 2 + 1
+    kernel_size = radius * 2 + 1
 
+    # Convert RGB to luminance.
     gray = (
         frames_bchw[:, 0:1] * 0.299
         + frames_bchw[:, 1:2] * 0.587
         + frames_bchw[:, 2:3] * 0.114
     )
 
+    # Estimate local RGB variance.
     local_mean = F.avg_pool2d(
         gray,
-        kernel_size=k,
+        kernel_size=kernel_size,
         stride=1,
         padding=radius,
     )
 
     local_sq_mean = F.avg_pool2d(
         gray * gray,
-        kernel_size=k,
+        kernel_size=kernel_size,
         stride=1,
         padding=radius,
     )
@@ -70,15 +74,19 @@ def refine_depth_edges(
         local_sq_mean - local_mean * local_mean
     ).clamp_min(0.0)
 
-    edge_weight = torch.exp(-edge_strength * local_variance)
+    # Strong RGB edges -> edge_weight approaches 0.
+    # Flat regions -> edge_weight approaches 1.
+    edge_weight = torch.exp(-strength * local_variance)
 
+    # Local depth average.
     depth_mean = F.avg_pool2d(
         depth_b1hw,
-        kernel_size=k,
+        kernel_size=kernel_size,
         stride=1,
         padding=radius,
     )
 
+    # Smooth mostly where the RGB image is locally flat.
     refined = (
         depth_b1hw * edge_weight
         + depth_mean * (1.0 - edge_weight)
@@ -183,7 +191,15 @@ class DepthAnythingRunner:
                 f"Failed to load Depth Anything model '{self.model_name}' via transformers fallback. {message}"
             )
 
-    def infer(self, frames_bchw: torch.Tensor, invert_depth: bool = False) -> torch.Tensor:
+    def infer(
+        self,
+        frames_bchw: torch.Tensor,
+        invert_depth: bool = False,
+        edge_refine: bool = False,
+        edge_radius: int = 2,
+        edge_strength: float = 8.0,
+    ) -> torch.Tensor:
+
         self.load()
         original_size = frames_bchw.shape[-2:]
         inference_frames = self._prepare_inference_frames(frames_bchw)
@@ -199,14 +215,16 @@ class DepthAnythingRunner:
 
         depth = self._restore_depth_size(depth, original_size)
 
-        depth = refine_depth_edges(
-            frames_bchw=frames_bchw,
-            depth_b1hw=depth,
-            radius=2,
-            edge_strength=8.0,
-        )
+        if edge_refine:
+            depth = refine_depth_edges(
+                frames_bchw=frames_bchw,
+                depth_b1hw=depth,
+                radius=edge_radius,
+                strength=edge_strength,
+            )
 
         return depth
+
         
 
     def _prepare_inference_frames(self, frames_bchw: torch.Tensor) -> torch.Tensor:

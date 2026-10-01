@@ -26,6 +26,9 @@ class StereoVideoJob:
     depth_model: str
     depth_use_source_resolution: bool
     depth_inference_resolution: int
+    depth_edge_refine: bool
+    depth_edge_radius: int
+    depth_edge_strength: float
     chunk_size: int
     disparity_px: float
     depth_power: float
