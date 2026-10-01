@@ -28,7 +28,6 @@ class StereoVideoJob:
     depth_edge_radius: int
     depth_edge_strength: float
     chunk_size: int
-    disparity_px: float
     depth_power: float
     invert_depth: bool
     disparity_ratio: float = 0.0

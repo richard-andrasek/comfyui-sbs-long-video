@@ -102,7 +102,7 @@ Audio behavior:
 
 Preview and batch behavior:
 
-- `every_nth` let you create previews of every Nth frame
+- `preview_run` processes every 30th frame for a quick preview; disabled processes every frame
 - `chunk_size` controls how many frames are processed at once
 - `filename_prefix` controls the base name of each final export
 
@@ -128,10 +128,9 @@ Builds the video job definition.
 - `depth_model`: built-in depth model size
 - `depth_use_source_resolution`: run depth at source resolution when enabled
 - `depth_inference_resolution`: manual inference size when source-resolution mode is disabled
-- `every_nth`: frame skipping factor for faster previews or lower output FPS
+- `preview_run`: when enabled, processes every 30th frame for a quick preview
 - `chunk_size`: frames processed per chunk
 - `disparity_ratio`: stereo separation as a fraction of image width
-- `disparity_px`: legacy fallback used only when `disparity_ratio` is `0`
 - `depth_power`: depth response curve before reprojection
 - `invert_depth`: flips the inferred or provided depth map
 - `audio_mode`: `copy` or `none`

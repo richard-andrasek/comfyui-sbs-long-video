@@ -125,11 +125,11 @@
                     "link": null
                 },
                 {
-                    "localized_name": "every_nth",
-                    "name": "every_nth",
-                    "type": "INT",
+                    "localized_name": "preview_run",
+                    "name": "preview_run",
+                    "type": "BOOLEAN",
                     "widget": {
-                        "name": "every_nth"
+                        "name": "preview_run"
                     },
                     "link": null
                 },
@@ -148,15 +148,6 @@
                     "type": "FLOAT",
                     "widget": {
                         "name": "disparity_ratio"
-                    },
-                    "link": null
-                },
-                {
-                    "localized_name": "disparity_px",
-                    "name": "disparity_px",
-                    "type": "FLOAT",
-                    "widget": {
-                        "name": "disparity_px"
                     },
                     "link": null
                 },
@@ -215,12 +206,11 @@
                 "da3_small",
                 true,
                 512,
-                0,
+                false,
                 0,
                 1,
                 4,
                 0.011458333333333333,
-                12,
                 0.3,
                 true,
                 "copy",

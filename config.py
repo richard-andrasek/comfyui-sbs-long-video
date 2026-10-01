@@ -10,7 +10,6 @@ CATEGORY = "Stereo Video"
 class PluginDefaults:
     chunk_size: int = 4
     depth_inference_size: int = 512
-    disparity_px: float = 0.0
     disparity_ratio: float = 22.0 / 1920.0
     depth_power: float = 1.0
     output_codec: str = "libx264"

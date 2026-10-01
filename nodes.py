@@ -71,10 +71,9 @@ class StereoVideoSource:
                 "depth_model": (["da3_small", "da3_base", "da3_large"], {"default": "da3_small", "tooltip": "Depth model size used when automatic depth estimation is enabled."}),
                 "depth_use_source_resolution": ("BOOLEAN", {"default": True, "tooltip": "Run depth inference at the video's original frame resolution instead of a manual lower resolution."}),
                 "depth_inference_resolution": ("INT", {"default": DEFAULTS.depth_inference_size, "min": 128, "max": 2048, "tooltip": "Manual longest-side resolution for depth inference when source-resolution mode is off."}),
-                "every_nth": ("INT", {"default": 1, "min": 1, "tooltip": "Frame skipping factor. Higher values render faster previews and lower the output FPS."}),
+                "preview_run": ("BOOLEAN", {"default": False, "tooltip": "Render a storyboard preview by processing every 30th frame."}),
                 "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM."}),
                 "disparity_ratio": ("FLOAT", {"default": DEFAULTS.disparity_ratio, "min": 0.0, "max": 0.25, "step": 0.0005, "tooltip": "Stereo separation as a fraction of image width. This keeps the 3D strength more consistent across different resolutions."}),
-                "disparity_px": ("FLOAT", {"default": 12.0, "min": 0.0, "max": 256.0, "step": 0.5, "tooltip": "Legacy fallback pixel disparity. Used only when disparity_ratio is 0 for older workflows."}),
                 "depth_power": ("FLOAT", {"default": 0.30, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
@@ -119,11 +118,10 @@ class StereoVideoSource:
         use_depth_video: bool,
         depth_model: str,
         depth_use_source_resolution: bool,
-        every_nth: int,
+        preview_run: bool,
         chunk_size: int,
         depth_inference_resolution: int,
         disparity_ratio: float,
-        disparity_px: float,
         depth_power: float,
         invert_depth: bool,
         audio_mode: str,
@@ -135,6 +133,9 @@ class StereoVideoSource:
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
+        # Translate the user-facing preview toggle into the internal frame stride
+        # before selecting source or depth video frames.
+        every_nth = 30 if preview_run else 1
         metadata = probe_video(source_video)
         spec = select_video_spec(metadata, every_nth=every_nth)
 
@@ -167,7 +168,6 @@ class StereoVideoSource:
             depth_edge_radius=depth_edge_radius,
             depth_edge_strength=depth_edge_strength,
             chunk_size=chunk_size,
-            disparity_px=disparity_px,
             disparity_ratio=disparity_ratio,
             depth_power=depth_power,
             invert_depth=invert_depth,
@@ -256,7 +256,6 @@ class StereoVideoConvert:
                     rendered = renderer.render(
                         frames_bhwc=frames,
                         depth_b1hw=depth,
-                        disparity_px=job.disparity_px,
                         disparity_ratio=job.disparity_ratio,
                         layout=job.stereo_layout,
                         depth_power=job.depth_power,
