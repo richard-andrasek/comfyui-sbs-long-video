@@ -7,6 +7,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from .depth_refinement import (
+    refine_depth_edges,
+    fast_global_smoother,
+)
+
 
 MODEL_CANDIDATES = {
     "da3_small": ["depth-anything/DA3-SMALL", "depth-anything/DA3-SMALL-1.1"],
@@ -22,77 +27,6 @@ HF_MODEL_CANDIDATES = {
     "da3_base": ["depth-anything/Depth-Anything-V2-Base-hf"],
     "da3_large": ["depth-anything/Depth-Anything-V2-Large-hf"],
 }
-
-def refine_depth_edges(
-    frames_bchw: torch.Tensor,
-    depth_b1hw: torch.Tensor,
-    radius: int = 2,
-    strength: float = 8.0,
-) -> torch.Tensor:
-    """
-    Edge-aware depth smoothing.
-
-    Smooths depth locally while reducing smoothing across strong RGB edges.
-
-    frames_bchw: [B, 3, H, W], RGB in [0, 1]
-    depth_b1hw:  [B, 1, H, W], normalized depth in [0, 1]
-    """
-    if radius <= 0 or strength <= 0:
-        return depth_b1hw
-
-    # Keep RGB and depth on the same device/dtype.
-    frames_bchw = frames_bchw.to(
-        device=depth_b1hw.device,
-        dtype=depth_b1hw.dtype,
-    )
-
-    kernel_size = radius * 2 + 1
-
-    # Convert RGB to luminance.
-    gray = (
-        frames_bchw[:, 0:1] * 0.299
-        + frames_bchw[:, 1:2] * 0.587
-        + frames_bchw[:, 2:3] * 0.114
-    )
-
-    # Estimate local RGB variance.
-    local_mean = F.avg_pool2d(
-        gray,
-        kernel_size=kernel_size,
-        stride=1,
-        padding=radius,
-    )
-
-    local_sq_mean = F.avg_pool2d(
-        gray * gray,
-        kernel_size=kernel_size,
-        stride=1,
-        padding=radius,
-    )
-
-    local_variance = (
-        local_sq_mean - local_mean * local_mean
-    ).clamp_min(0.0)
-
-    # Strong RGB edges -> edge_weight approaches 0.
-    # Flat regions -> edge_weight approaches 1.
-    edge_weight = torch.exp(-strength * local_variance)
-
-    # Local depth average.
-    depth_mean = F.avg_pool2d(
-        depth_b1hw,
-        kernel_size=kernel_size,
-        stride=1,
-        padding=radius,
-    )
-
-    # Smooth mostly where the RGB image is locally flat.
-    refined = (
-        depth_b1hw * edge_weight
-        + depth_mean * (1.0 - edge_weight)
-    )
-
-    return refined.clamp(0.0, 1.0)
 
 
 class DepthAnythingRunner:
@@ -195,7 +129,7 @@ class DepthAnythingRunner:
         self,
         frames_bchw: torch.Tensor,
         invert_depth: bool = False,
-        edge_refine: bool = False,
+        edge_refine_method: str = "none",
         edge_radius: int = 2,
         edge_strength: float = 8.0,
     ) -> torch.Tensor:
@@ -215,13 +149,20 @@ class DepthAnythingRunner:
 
         depth = self._restore_depth_size(depth, original_size)
 
-        if edge_refine:
-            depth = refine_depth_edges(
-                frames_bchw=frames_bchw,
-                depth_b1hw=depth,
-                radius=edge_radius,
-                strength=edge_strength,
-            )
+        if edge_refine_method != "none":
+            if edge_refine_method == "simple":
+                depth = refine_depth_edges(
+                    frames_bchw,
+                    depth,
+                    radius=edge_radius,
+                    strength=edge_strength,
+                )
+            elif edge_refine_method == "fgs":
+                depth = fast_global_smoother(
+                    frames_bchw,
+                    depth,
+                )
+
 
         return depth
 

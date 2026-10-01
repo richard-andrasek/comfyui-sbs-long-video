@@ -26,7 +26,7 @@ class StereoVideoJob:
     depth_model: str
     depth_use_source_resolution: bool
     depth_inference_resolution: int
-    depth_edge_refine: bool
+    depth_edge_refine_method: str
     depth_edge_radius: int
     depth_edge_strength: float
     chunk_size: int
@@ -53,6 +53,10 @@ class StereoVideoJob:
         payload.pop("type", None)
         payload.pop("version", None)
         payload.setdefault("disparity_ratio", 0.0)
+        if "depth_edge_refine_method" not in payload:
+            payload["depth_edge_refine_method"] = "simple" if payload.pop("depth_edge_refine", False) else "none"
+        payload.setdefault("depth_edge_radius", 2)
+        payload.setdefault("depth_edge_strength", 8.0)
         return cls(**payload)
 
 

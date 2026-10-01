@@ -52,7 +52,7 @@ def _status_text(job: StereoVideoJob) -> str:
 
 
 class StereoVideoSource:
-    DESCRIPTION = "Builds a long-video stereo conversion job from a source clip and depth settings."
+    DESCRIPTION = "Builds a long-video stereo conversion job with optional depth refinement: none, simple, or Fast Global Smoother (FGS)."
     OUTPUT_TOOLTIPS = [
         "Internal job handle for StereoVideoConvert.",
         "Human-readable summary of the selected source clip and render settings.",
@@ -81,11 +81,11 @@ class StereoVideoSource:
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
                 "spill_policy": (["auto", "memory_only", "spill_to_temp", "debug_keep_frames"], {"default": "auto", "tooltip": "Reserved workflow/memory policy setting. The current pipeline does not materially change behavior based on this yet."}),
-                "depth_edge_refine": (
-                    "BOOLEAN",
+                "depth_edge_refine_method": (
+                    ["none", "simple", "fgs"],
                     {
-                        "default": False,
-                        "tooltip": "Refine depth boundaries using RGB image edges before stereo reprojection.",
+                        "default": "none",
+                        "tooltip": "Depth refinement method: none disables refinement, simple uses local RGB edge-aware smoothing, and fgs uses Fast Global Smoother based refinement.",
                     },
                 ),
                 "depth_edge_radius": (
@@ -134,7 +134,7 @@ class StereoVideoSource:
         audio_mode: str,
         spill_policy: str,
         depth_video: str = "none",
-        depth_edge_refine: bool = False,
+        depth_edge_refine_method: str = "none",
         depth_edge_radius: int = 2,
         depth_edge_strength: float = 8.0,
     ):
@@ -171,7 +171,7 @@ class StereoVideoSource:
             depth_model=depth_model,
             depth_use_source_resolution=depth_use_source_resolution,
             depth_inference_resolution=depth_inference_resolution,
-            depth_edge_refine=depth_edge_refine,
+            depth_edge_refine_method=depth_edge_refine_method,
             depth_edge_radius=depth_edge_radius,
             depth_edge_strength=depth_edge_strength,
             chunk_size=chunk_size,
@@ -255,7 +255,7 @@ class StereoVideoConvert:
                         depth = runner.infer(
                             frames.permute(0, 3, 1, 2),
                             invert_depth=job.invert_depth,
-                            edge_refine=job.depth_edge_refine,
+                            edge_refine_method=job.depth_edge_refine_method,
                             edge_radius=job.depth_edge_radius,
                             edge_strength=job.depth_edge_strength,
                         )

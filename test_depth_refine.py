@@ -1,5 +1,5 @@
 import torch
-from depth_runner import refine_depth_edges
+from depth_refinement import refine_depth_edges
 
 
 def main():
