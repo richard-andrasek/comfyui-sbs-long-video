@@ -4,7 +4,6 @@ import { api } from "../../../scripts/api.js";
 const NODE_NAMES = new Set(["StereoVideoSource"]);
 const VIDEO_WIDGETS = [
   { name: "source_video", label: "source video" },
-  { name: "depth_video", label: "depth video" },
 ];
 
 function makeUploadHandler(node, fileWidget) {

@@ -59,7 +59,7 @@ class SelectedVideoSpec:
 VIDEO_EXTENSIONS = ("webm", "mp4", "mkv", "gif", "mov", "avi", "m4v")
 
 
-def list_input_videos(include_none: bool = False) -> list[str]:
+def list_input_videos() -> list[str]:
     try:
         input_dir = folder_paths.get_input_directory()
         files = []
@@ -69,11 +69,9 @@ def list_input_videos(include_none: bool = False) -> list[str]:
                 if os.path.isfile(full_path) and entry.lower().split(".")[-1] in VIDEO_EXTENSIONS:
                     files.append(entry)
         files = sorted(files)
-        if include_none:
-            return files if files else ["none"]
         return files
     except Exception:
-        return ["none"] if include_none else []
+        return []
 
 
 def resolve_input_path(path: str) -> str:

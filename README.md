@@ -69,7 +69,7 @@ After installing dependencies, restart ComfyUI.
 ## Workflow
 
 1. Add `Stereo Video Source` and choose a source clip from ComfyUI's input directory.
-2. Leave `use_depth_video` off to estimate depth automatically using the Depth Anything 3 model, or enable it and select a matching depth video.
+2. Choose a Depth Anything 3 model and inference settings for automatic depth estimation.
 3. Send the job into `Stereo Video Convert` to run decode, depth, stereo rendering, and temporary video encode.
 4. Optionally enable `output_depth_video` to save generated depth as a lossless 8-bit grayscale FFV1/MKV file. This is allowed for sources shorter than 60 seconds, or when `preview_run` is enabled. Finish with `Stereo Video Mux Output` to save the final file into ComfyUI's output directory.
 
@@ -78,7 +78,6 @@ After installing dependencies, restart ComfyUI.
 This plugin works with ComfyUI's standard directories:
 
 - Source clips are read from the ComfyUI input directory.
-- Optional external depth videos are also selected from the input directory.
 - `StereoVideoConvert` writes a temporary rendered video into the ComfyUI temp directory.
 - `StereoVideoMuxOutput` writes the final video into the ComfyUI output directory. When requested, it also writes the generated depth video there as `<prefix>_depth_00001.mkv` (auto-incremented).
 
@@ -106,14 +105,9 @@ Preview and batch behavior:
 - `chunk_size` controls how many frames are processed at once
 - `filename_prefix` controls the base name of each final export
 
-## Depth Modes
+## Depth Estimation
 
-Current depth sources:
-
-- built-in depth estimation via `depth_anything_v3`
-- external depth video via `use_depth_video`
-
-Use external depth video when you already have a precomputed depth pass. For generating one, you can use [https://github.com/DepthAnything/Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything). Lenght in frames and resolution has to match on both input videos.
+Depth is estimated automatically with the selected Depth Anything model.
 
 ## Node Reference
 
@@ -123,8 +117,6 @@ Builds the video job definition.
 
 - `source_video`: main input clip
 - `stereo_layout`: `sbs` or `top_bottom`
-- `use_depth_video`: switch between built-in depth estimation and external depth video
-- `depth_video`: optional external depth clip; must match the selected source range
 - `depth_model`: built-in depth model size
 - `depth_use_source_resolution`: run depth at source resolution when enabled
 - `depth_inference_resolution`: manual inference size when source-resolution mode is disabled
@@ -133,7 +125,7 @@ Builds the video job definition.
 - `chunk_size`: frames processed per chunk
 - `disparity_percent`: stereo separation as a percentage of image width (for example, `1.5` for 1.5%)
 - `depth_power`: depth response curve before reprojection
-- `invert_depth`: flips the inferred or provided depth map
+- `invert_depth`: flips the inferred depth map
 - `audio_mode`: `copy` or `none`
 
 ### StereoVideoConvert

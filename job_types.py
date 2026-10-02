@@ -19,8 +19,6 @@ class StereoVideoJob:
     every_nth: int
     audio_mode: str
     stereo_layout: str
-    depth_mode: str
-    depth_video_path: Optional[str]
     depth_model: str
     depth_use_source_resolution: bool
     depth_inference_resolution: int
@@ -47,6 +45,8 @@ class StereoVideoJob:
         payload = dict(handle)
         payload.pop("type", None)
         payload.pop("version", None)
+        payload.pop("depth_mode", None)
+        payload.pop("depth_video_path", None)
         if "disparity_percent" not in payload:
             payload["disparity_percent"] = payload.pop("disparity_ratio", 0.0) * 100.0
         else:
