@@ -84,25 +84,6 @@ class StereoVideoSource:
                         "tooltip": "Depth refinement method: none disables refinement, simple uses local RGB edge-aware smoothing, and fgs uses Fast Global Smoother based refinement.",
                     },
                 ),
-                "depth_edge_radius": (
-                    "INT",
-                    {
-                        "default": 2,
-                        "min": 1,
-                        "max": 16,
-                        "tooltip": "Radius of the edge-aware depth refinement neighborhood.",
-                    },
-                ),
-                "depth_edge_strength": (
-                    "FLOAT",
-                    {
-                        "default": 8.0,
-                        "min": 0.1,
-                        "max": 100.0,
-                        "step": 0.5,
-                        "tooltip": "Strength of RGB-edge protection during depth refinement.",
-                    },
-                ),
             },
         }
 
@@ -127,8 +108,6 @@ class StereoVideoSource:
         audio_mode: str,
         depth_video: str = "none",
         depth_edge_refine_method: str = "none",
-        depth_edge_radius: int = 2,
-        depth_edge_strength: float = 8.0,
     ):
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
@@ -165,8 +144,6 @@ class StereoVideoSource:
             depth_use_source_resolution=depth_use_source_resolution,
             depth_inference_resolution=depth_inference_resolution,
             depth_edge_refine_method=depth_edge_refine_method,
-            depth_edge_radius=depth_edge_radius,
-            depth_edge_strength=depth_edge_strength,
             chunk_size=chunk_size,
             disparity_percent=disparity_percent,
             depth_power=depth_power,
@@ -243,8 +220,6 @@ class StereoVideoConvert:
                             frames.permute(0, 3, 1, 2),
                             invert_depth=job.invert_depth,
                             edge_refine_method=job.depth_edge_refine_method,
-                            edge_radius=job.depth_edge_radius,
-                            edge_strength=job.depth_edge_strength,
                         )
                     else:
                         try:

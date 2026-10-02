@@ -130,8 +130,6 @@ class DepthAnythingRunner:
         frames_bchw: torch.Tensor,
         invert_depth: bool = False,
         edge_refine_method: str = "none",
-        edge_radius: int = 2,
-        edge_strength: float = 8.0,
     ) -> torch.Tensor:
 
         self.load()
@@ -154,8 +152,6 @@ class DepthAnythingRunner:
                 depth = refine_depth_edges(
                     frames_bchw,
                     depth,
-                    radius=edge_radius,
-                    strength=edge_strength,
                 )
             elif edge_refine_method == "fgs":
                 depth = fast_global_smoother(
