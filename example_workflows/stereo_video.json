@@ -80,20 +80,11 @@
                     "link": null
                 },
                 {
-                    "localized_name": "use_depth_video",
-                    "name": "use_depth_video",
+                    "localized_name": "output_depth_video",
+                    "name": "output_depth_video",
                     "type": "BOOLEAN",
                     "widget": {
-                        "name": "use_depth_video"
-                    },
-                    "link": null
-                },
-                {
-                    "localized_name": "depth_video",
-                    "name": "depth_video",
-                    "type": "COMBO",
-                    "widget": {
-                        "name": "depth_video"
+                        "name": "output_depth_video"
                     },
                     "link": null
                 },
@@ -125,29 +116,11 @@
                     "link": null
                 },
                 {
-                    "localized_name": "start_frame",
-                    "name": "start_frame",
-                    "type": "INT",
+                    "localized_name": "preview_run",
+                    "name": "preview_run",
+                    "type": "BOOLEAN",
                     "widget": {
-                        "name": "start_frame"
-                    },
-                    "link": null
-                },
-                {
-                    "localized_name": "end_frame",
-                    "name": "end_frame",
-                    "type": "INT",
-                    "widget": {
-                        "name": "end_frame"
-                    },
-                    "link": null
-                },
-                {
-                    "localized_name": "every_nth",
-                    "name": "every_nth",
-                    "type": "INT",
-                    "widget": {
-                        "name": "every_nth"
+                        "name": "preview_run"
                     },
                     "link": null
                 },
@@ -161,20 +134,11 @@
                     "link": null
                 },
                 {
-                    "localized_name": "disparity_ratio",
-                    "name": "disparity_ratio",
+                    "localized_name": "disparity_percent",
+                    "name": "disparity_percent",
                     "type": "FLOAT",
                     "widget": {
-                        "name": "disparity_ratio"
-                    },
-                    "link": null
-                },
-                {
-                    "localized_name": "disparity_px",
-                    "name": "disparity_px",
-                    "type": "FLOAT",
-                    "widget": {
-                        "name": "disparity_px"
+                        "name": "disparity_percent"
                     },
                     "link": null
                 },
@@ -204,15 +168,6 @@
                         "name": "audio_mode"
                     },
                     "link": null
-                },
-                {
-                    "localized_name": "spill_policy",
-                    "name": "spill_policy",
-                    "type": "COMBO",
-                    "widget": {
-                        "name": "spill_policy"
-                    },
-                    "link": null
                 }
             ],
             "outputs": [
@@ -238,16 +193,14 @@
                 "dolphin.mp4",
                 "sbs",
                 false,
-                "dolphin.mp4",
                 "da3_small",
                 true,
                 512,
-                0,
+                false,
                 0,
                 1,
                 4,
-                0.011458333333333333,
-                12,
+                1.15,
                 0.3,
                 true,
                 "copy",

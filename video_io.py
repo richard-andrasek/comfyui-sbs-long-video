@@ -50,19 +50,16 @@ class VideoMetadata:
 @dataclass(frozen=True)
 class SelectedVideoSpec:
     metadata: VideoMetadata
-    start_frame: int
-    end_frame: int
     every_nth: int
     target_fps: float
     selected_frame_count: int
-    start_seconds: float
     selected_duration_seconds: float
 
 
 VIDEO_EXTENSIONS = ("webm", "mp4", "mkv", "gif", "mov", "avi", "m4v")
 
 
-def list_input_videos(include_none: bool = False) -> list[str]:
+def list_input_videos() -> list[str]:
     try:
         input_dir = folder_paths.get_input_directory()
         files = []
@@ -72,11 +69,9 @@ def list_input_videos(include_none: bool = False) -> list[str]:
                 if os.path.isfile(full_path) and entry.lower().split(".")[-1] in VIDEO_EXTENSIONS:
                     files.append(entry)
         files = sorted(files)
-        if include_none:
-            return files if files else ["none"]
         return files
     except Exception:
-        return ["none"] if include_none else []
+        return []
 
 
 def resolve_input_path(path: str) -> str:
@@ -193,10 +188,8 @@ def probe_video(path: str) -> VideoMetadata:
     )
 
 
-def select_video_range(
+def select_video_spec(
     metadata: VideoMetadata,
-    start_frame: int = 0,
-    end_frame: int = 0,
     every_nth: int = 1,
 ) -> SelectedVideoSpec:
     if metadata.fps <= 0:
@@ -206,26 +199,16 @@ def select_video_range(
     total_frames = metadata.frame_count or int(round(metadata.duration * metadata.fps))
     if total_frames <= 0:
         raise RuntimeError(f"Could not determine frame count for {metadata.path}")
-    start = max(0, int(start_frame))
-    stop = total_frames if not end_frame or end_frame <= 0 else min(int(end_frame), total_frames)
-    if stop <= start:
-        raise ValueError("end_frame must be greater than start_frame")
-    selected = int(math.ceil((stop - start) / every_nth))
+    selected = int(math.ceil(total_frames / every_nth))
     target_fps = metadata.fps / every_nth
-    start_seconds = start / metadata.fps
     duration_seconds = selected / target_fps
     return SelectedVideoSpec(
         metadata=metadata,
-        start_frame=start,
-        end_frame=stop,
         every_nth=every_nth,
         target_fps=target_fps,
         selected_frame_count=selected,
-        start_seconds=start_seconds,
         selected_duration_seconds=duration_seconds,
     )
-
-
 class FFmpegChunkDecoder:
     def __init__(
         self,
@@ -242,10 +225,8 @@ class FFmpegChunkDecoder:
 
     def _command(self) -> list[str]:
         selector_terms = []
-        if self.spec.start_frame > 0:
-            selector_terms.append(f"gte(n\\,{self.spec.start_frame})")
         if self.spec.every_nth > 1:
-            selector_terms.append(f"not(mod(n-{self.spec.start_frame}\\,{self.spec.every_nth}))")
+            selector_terms.append(f"not(mod(n\\,{self.spec.every_nth}))")
         vf_parts = []
         if selector_terms:
             vf_parts.append(f"select='{ '*'.join(selector_terms) }'")
@@ -264,8 +245,8 @@ class FFmpegChunkDecoder:
             "rawvideo",
             "-pix_fmt",
             self.pixel_format,
-            "-vsync",
-            "0",
+            "-fps_mode",
+            "passthrough",
             "pipe:1",
         ]
 

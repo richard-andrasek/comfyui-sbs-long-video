@@ -7,6 +7,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from .depth_refinement import (
+    refine_depth_edges,
+    fast_global_smoother,
+)
+
 
 MODEL_CANDIDATES = {
     "da3_small": ["depth-anything/DA3-SMALL", "depth-anything/DA3-SMALL-1.1"],
@@ -120,17 +125,44 @@ class DepthAnythingRunner:
                 f"Failed to load Depth Anything model '{self.model_name}' via transformers fallback. {message}"
             )
 
-    def infer(self, frames_bchw: torch.Tensor, invert_depth: bool = False) -> torch.Tensor:
+    def infer(
+        self,
+        frames_bchw: torch.Tensor,
+        invert_depth: bool = False,
+        edge_refine_method: str = "none",
+    ) -> torch.Tensor:
+
         self.load()
         original_size = frames_bchw.shape[-2:]
         inference_frames = self._prepare_inference_frames(frames_bchw)
+
         if self._api_backend is not None:
             depth = self._infer_official_api(inference_frames, invert_depth=invert_depth)
         elif self._pipeline is not None:
             depth = self._infer_pipeline(inference_frames, invert_depth=invert_depth)
         else:
             depth = self._infer_model(inference_frames, invert_depth=invert_depth)
-        return self._restore_depth_size(depth, original_size)
+
+        #return self._restore_depth_size(depth, original_size)
+
+        depth = self._restore_depth_size(depth, original_size)
+
+        if edge_refine_method != "none":
+            if edge_refine_method == "simple":
+                depth = refine_depth_edges(
+                    frames_bchw,
+                    depth,
+                )
+            elif edge_refine_method == "fgs":
+                depth = fast_global_smoother(
+                    frames_bchw,
+                    depth,
+                )
+
+
+        return depth
+
+        
 
     def _prepare_inference_frames(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         if not self.inference_resolution:
