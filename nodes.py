@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from contextlib import ExitStack
 from typing import Optional
 
@@ -10,7 +11,7 @@ import torch
 try:
     from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
     from .depth_runner import DepthAnythingRunner
-    from .encoder import StreamingVideoEncoder, finalize_mux
+    from .encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from .job_types import StereoVideoJob, StereoVideoRender
     from .stereo_renderer import GpuStereoRenderer
     from .video_io import (
@@ -25,7 +26,7 @@ try:
 except ImportError:
     from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
     from depth_runner import DepthAnythingRunner
-    from encoder import StreamingVideoEncoder, finalize_mux
+    from encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from job_types import StereoVideoJob, StereoVideoRender
     from stereo_renderer import GpuStereoRenderer
     from video_io import (
@@ -67,6 +68,7 @@ class StereoVideoSource:
                 "source_video": (input_videos if input_videos else ["none"], {"tooltip": "Main input clip to convert into stereo."}),
                 "stereo_layout": (["sbs", "top_bottom"], {"default": "sbs", "tooltip": "Stereo arrangement for the output video."}),
                 "use_depth_video": ("BOOLEAN", {"default": False, "tooltip": "Use an uploaded depth reference clip instead of estimating depth automatically."}),
+                "output_depth_video": ("BOOLEAN", {"default": False, "tooltip": "Save the generated depth as a lossless grayscale video. Allowed for clips under 60 seconds or when preview_run is enabled."}),
                 "depth_video": (optional_videos, {"tooltip": "Optional external depth video. It must match the source clip in frame count when enabled."}),
                 "depth_model": (["da3_small", "da3_base", "da3_large"], {"default": "da3_small", "tooltip": "Depth model size used when automatic depth estimation is enabled."}),
                 "depth_use_source_resolution": ("BOOLEAN", {"default": True, "tooltip": "Run depth inference at the video's original frame resolution instead of a manual lower resolution."}),
@@ -97,6 +99,7 @@ class StereoVideoSource:
         source_video: str,
         stereo_layout: str,
         use_depth_video: bool,
+        output_depth_video: bool,
         depth_model: str,
         depth_use_source_resolution: bool,
         preview_run: bool,
@@ -117,6 +120,13 @@ class StereoVideoSource:
         every_nth = 30 if preview_run else 1
         metadata = probe_video(source_video)
         spec = select_video_spec(metadata, every_nth=every_nth)
+        source_duration = metadata.duration
+        if source_duration <= 0 and metadata.frame_count > 0 and metadata.fps > 0:
+            source_duration = metadata.frame_count / metadata.fps
+        if source_duration <= 0:
+            source_duration = spec.selected_duration_seconds
+        if output_depth_video and not use_depth_video and not preview_run and source_duration >= 60.0:
+            raise ValueError("Generated depth-video output is limited to source clips under 60 seconds. Enable preview_run to allow depth output for a longer clip.")
 
         depth_mode = "external_depth_video" if use_depth_video else "depth_anything_v3"
         depth_path: Optional[str] = None
@@ -150,7 +160,8 @@ class StereoVideoSource:
             invert_depth=invert_depth,
             temp_dir=None,
             frame_count=spec.selected_frame_count,
-            source_duration=spec.selected_duration_seconds,
+            source_duration=source_duration,
+            output_depth_video=bool(output_depth_video and not use_depth_video),
         )
         return (job.to_handle(), _status_text(job))
 
@@ -182,6 +193,7 @@ class StereoVideoConvert:
         render_height = job.height if job.stereo_layout == "sbs" else job.height * 2
         temp_dir = get_temp_dir()
         temp_video_path = os.path.join(temp_dir, "rendered_video.mp4")
+        temp_depth_video_path = os.path.join(temp_dir, "generated_depth.mkv") if job.output_depth_video and job.depth_mode == "depth_anything_v3" else None
 
         runner = None
         if job.depth_mode == "depth_anything_v3":
@@ -204,6 +216,14 @@ class StereoVideoConvert:
                     )
                     depth_decoder = stack.enter_context(FFmpegChunkDecoder(depth_spec, chunk_size=job.chunk_size))
                     depth_iter = iter(depth_decoder)
+                depth_encoder = stack.enter_context(
+                    StreamingDepthVideoEncoder(
+                        output_path=temp_depth_video_path,
+                        width=job.width,
+                        height=job.height,
+                        fps=job.target_fps,
+                    )
+                ) if temp_depth_video_path else None
                 encoder = stack.enter_context(
                     StreamingVideoEncoder(
                         output_path=temp_video_path,
@@ -228,6 +248,8 @@ class StereoVideoConvert:
                             raise RuntimeError("Depth video ended before source video") from exc
                         depth = self._depth_from_video_chunk(depth_chunk, invert_depth=job.invert_depth)
 
+                    if depth_encoder is not None:
+                        depth_encoder.write_depth(depth)
                     rendered = renderer.render(
                         frames_bhwc=frames,
                         depth_b1hw=depth,
@@ -255,6 +277,7 @@ class StereoVideoConvert:
             width=render_width,
             height=render_height,
             stereo_layout=job.stereo_layout,
+            temp_depth_video_path=temp_depth_video_path,
         )
         return (render.to_handle(), f"Rendered {processed_frames} frames to temp video")
 
@@ -271,7 +294,7 @@ class StereoVideoConvert:
 
 class StereoVideoMuxOutput:
     DESCRIPTION = "Finalizes the rendered temp video, optionally muxes audio, and saves the output with an auto-incremented filename."
-    OUTPUT_TOOLTIPS = ["Final saved output path."]
+    OUTPUT_TOOLTIPS = ["Final saved stereo video path.", "Final saved generated depth-video path, or empty when depth export was not enabled."]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -283,8 +306,8 @@ class StereoVideoMuxOutput:
             }
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("output_path",)
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("output_path", "depth_output_path")
     FUNCTION = "mux"
     CATEGORY = CATEGORY
     OUTPUT_NODE = True
@@ -302,9 +325,13 @@ class StereoVideoMuxOutput:
                 audio_mode=render.audio_mode,
                 stereo_layout=render.stereo_layout,
             )
+            depth_finalized = ""
+            if render.temp_depth_video_path:
+                depth_finalized = resolve_output_prefix(f"{filename_prefix}_depth", "mkv")
+                shutil.move(render.temp_depth_video_path, depth_finalized)
         finally:
             cleanup_temp_dir(render.cleanup_dir)
-        return (finalized,)
+        return (finalized, depth_finalized)
 
 
 NODE_CLASS_MAPPINGS = {

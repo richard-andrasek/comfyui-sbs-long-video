@@ -32,6 +32,7 @@ class StereoVideoJob:
     temp_dir: Optional[str] = None
     frame_count: int = 0
     source_duration: float = 0.0
+    output_depth_video: bool = False
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -54,6 +55,7 @@ class StereoVideoJob:
             payload["depth_edge_refine_method"] = "simple" if payload.pop("depth_edge_refine", False) else "none"
         payload.pop("depth_edge_radius", None)
         payload.pop("depth_edge_strength", None)
+        payload.setdefault("output_depth_video", False)
         return cls(**payload)
 
 
@@ -70,6 +72,7 @@ class StereoVideoRender:
     width: int
     height: int
     stereo_layout: str
+    temp_depth_video_path: Optional[str] = None
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -84,4 +87,5 @@ class StereoVideoRender:
         payload = dict(handle)
         payload.pop("type", None)
         payload.pop("version", None)
+        payload.setdefault("temp_depth_video_path", None)
         return cls(**payload)

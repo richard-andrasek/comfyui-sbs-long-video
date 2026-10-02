@@ -6,6 +6,7 @@ import subprocess
 from typing import Optional
 
 import numpy as np
+import torch
 
 try:
     from .config import DEFAULTS
@@ -83,6 +84,45 @@ class StreamingVideoEncoder:
             if exc_type is None and return_code != 0:
                 raise RuntimeError(f"ffmpeg encode failed: {stderr.strip()}")
 
+
+
+class StreamingDepthVideoEncoder:
+    """Stream normalized depth as 8-bit grayscale FFV1 in Matroska."""
+
+    def __init__(self, output_path: str, width: int, height: int, fps: float) -> None:
+        self.output_path = output_path
+        self.width = int(width)
+        self.height = int(height)
+        self.fps = float(fps)
+        self.process: Optional[subprocess.Popen] = None
+
+    def __enter__(self) -> "StreamingDepthVideoEncoder":
+        command = [
+            ffmpeg_path(), "-y", "-f", "rawvideo", "-pix_fmt", "gray",
+            "-s", f"{self.width}x{self.height}", "-r", f"{self.fps:.8f}",
+            "-i", "pipe:0", "-an", "-c:v", "ffv1", "-level", "3",
+            "-pix_fmt", "gray", self.output_path,
+        ]
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        return self
+
+    def write_depth(self, depth_b1hw: torch.Tensor) -> None:
+        if not self.process or not self.process.stdin:
+            raise RuntimeError("Depth encoder process not started")
+        frames = depth_b1hw.detach().squeeze(1).clamp(0, 1).mul(255).round().to(torch.uint8).cpu().contiguous().numpy()
+        self.process.stdin.write(frames.tobytes())
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        stderr = ""
+        if self.process and self.process.stdin:
+            self.process.stdin.close()
+        if self.process and self.process.stderr:
+            stderr = self.process.stderr.read().decode("utf-8", errors="ignore")
+        if self.process:
+            return_code = self.process.wait(timeout=10)
+            self.process = None
+            if exc_type is None and return_code != 0:
+                raise RuntimeError(f"FFV1 depth encode failed: {stderr.strip()}")
 
 def _stereo_metadata_args(layout: str) -> list[str]:
     """FFmpeg metadata for YouTube 3D recognition. layout is 'sbs' or 'top_bottom'."""

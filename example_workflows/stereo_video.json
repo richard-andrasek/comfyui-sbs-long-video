@@ -89,6 +89,15 @@
                     "link": null
                 },
                 {
+                    "localized_name": "output_depth_video",
+                    "name": "output_depth_video",
+                    "type": "BOOLEAN",
+                    "widget": {
+                        "name": "output_depth_video"
+                    },
+                    "link": null
+                },
+                {
                     "localized_name": "depth_video",
                     "name": "depth_video",
                     "type": "COMBO",
@@ -201,6 +210,7 @@
             "widgets_values": [
                 "dolphin.mp4",
                 "sbs",
+                false,
                 false,
                 "dolphin.mp4",
                 "da3_small",

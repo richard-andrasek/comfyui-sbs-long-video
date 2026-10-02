@@ -71,7 +71,7 @@ After installing dependencies, restart ComfyUI.
 1. Add `Stereo Video Source` and choose a source clip from ComfyUI's input directory.
 2. Leave `use_depth_video` off to estimate depth automatically using the Depth Anything 3 model, or enable it and select a matching depth video.
 3. Send the job into `Stereo Video Convert` to run decode, depth, stereo rendering, and temporary video encode.
-4. Finish with `Stereo Video Mux Output` to save the final file into ComfyUI's output directory.
+4. Optionally enable `output_depth_video` to save generated depth as a lossless 8-bit grayscale FFV1/MKV file. This is allowed for sources shorter than 60 seconds, or when `preview_run` is enabled. Finish with `Stereo Video Mux Output` to save the final file into ComfyUI's output directory.
 
 ## How Files Are Produced
 
@@ -80,7 +80,7 @@ This plugin works with ComfyUI's standard directories:
 - Source clips are read from the ComfyUI input directory.
 - Optional external depth videos are also selected from the input directory.
 - `StereoVideoConvert` writes a temporary rendered video into the ComfyUI temp directory.
-- `StereoVideoMuxOutput` writes the final video into the ComfyUI output directory.
+- `StereoVideoMuxOutput` writes the final video into the ComfyUI output directory. When requested, it also writes the generated depth video there as `<prefix>_depth_00001.mkv` (auto-incremented).
 
 Final filenames are auto-incremented:
 
@@ -128,6 +128,7 @@ Builds the video job definition.
 - `depth_model`: built-in depth model size
 - `depth_use_source_resolution`: run depth at source resolution when enabled
 - `depth_inference_resolution`: manual inference size when source-resolution mode is disabled
+- `output_depth_video`: optionally save the generated normalized depth maps to a lossless 8-bit grayscale FFV1/MKV file; permitted only for source clips under 60 seconds unless `preview_run` is enabled. White/black direction follows `invert_depth`.
 - `preview_run`: when enabled, processes every 30th frame for a quick preview
 - `chunk_size`: frames processed per chunk
 - `disparity_percent`: stereo separation as a percentage of image width (for example, `1.5` for 1.5%)
@@ -141,6 +142,7 @@ Executes the job.
 
 - `video_job`: internal handle from `StereoVideoSource`
 - returns a rendered temp-video handle for the output node
+- when generated-depth export is enabled, streams each inferred depth chunk to a temporary FFV1 file alongside the stereo render
 
 ### StereoVideoMuxOutput
 
@@ -148,5 +150,6 @@ Writes the final deliverable.
 
 - `filename_prefix`: base name for the export
 - `output_format`: `mp4`, `webm`, or `mkv`
+- returns the final stereo path and, when enabled, the generated depth-video path
 
 
