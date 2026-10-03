@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
+import math
 from typing import Optional
 
 import numpy as np
@@ -28,10 +30,7 @@ HF_MODEL_CANDIDATES = {
     "da3_large": ["depth-anything/Depth-Anything-V2-Large-hf"],
 }
 
-# Internal defaults for temporal percentile normalization.
-TEMPORAL_DEPTH_EMA = 0.95
-TEMPORAL_DEPTH_LOW_PERCENTILE = 2.0
-TEMPORAL_DEPTH_HIGH_PERCENTILE = 98.0
+LOGGER = logging.getLogger(__name__)
 
 
 class DepthAnythingRunner:
@@ -41,6 +40,7 @@ class DepthAnythingRunner:
         inference_resolution: Optional[int] = 518,
         device: Optional[torch.device] = None,
         depth_normalization_method: str = "simple",
+        global_depth_max: float = 750.0,
     ) -> None:
         self.model_name = model_name
         self.inference_resolution = int(inference_resolution) if inference_resolution else None
@@ -52,16 +52,12 @@ class DepthAnythingRunner:
         self._api_backend = None
         self._model_id = None
         self.depth_normalization_method = depth_normalization_method
-        self._depth_range_ema: Optional[tuple[float, float]] = None
-        self._previous_cut_luma: Optional[torch.Tensor] = None
+        self.global_depth_max = float(global_depth_max)
 
-        if depth_normalization_method not in ("simple", "ema"):
-            raise ValueError("depth_normalization_method must be 'simple' or 'ema'")
-
-    def reset_temporal_normalization(self) -> None:
-        """Clear temporal depth and scene-cut state before a new video."""
-        self._depth_range_ema = None
-        self._previous_cut_luma = None
+        if depth_normalization_method not in ("simple", "global"):
+            raise ValueError("depth_normalization_method must be 'simple' or 'global'")
+        if not math.isfinite(self.global_depth_max) or self.global_depth_max <= 0:
+            raise ValueError("global_depth_max must be finite and greater than zero")
 
     def load(self) -> None:
         if self.model is not None or self._pipeline is not None or self._api_backend is not None:
@@ -147,6 +143,9 @@ class DepthAnythingRunner:
         frames_bchw: torch.Tensor,
         invert_depth: bool = False,
         edge_refine_method: str = "none",
+        source_frame_index_start: int = 0,
+        source_frame_stride: int = 1,
+        source_fps: Optional[float] = None,
     ) -> torch.Tensor:
 
         self.load()
@@ -169,7 +168,13 @@ class DepthAnythingRunner:
             depth = self._restore_depth_size(depth, original_size)
         else:
             depth = self._restore_depth_size(depth, original_size)
-            depth = self._normalize_depth_temporal(frames_bchw, depth)
+            depth = self._normalize_depth_global(
+                depth,
+                global_depth_max=self.global_depth_max,
+                source_frame_index_start=source_frame_index_start,
+                source_frame_stride=source_frame_stride,
+                source_fps=source_fps,
+            )
             if invert_depth:
                 depth = 1.0 - depth
 
@@ -255,75 +260,65 @@ class DepthAnythingRunner:
         stacked = torch.cat(outputs, dim=0)
         return stacked
 
-    def _normalize_depth_temporal(
-        self,
-        frames_bchw: torch.Tensor,
+    @staticmethod
+    def _normalize_depth_global(
         depth_b1hw: torch.Tensor,
-        cut_threshold: float = 0.25,
+        global_depth_max: float = 750.0,
+        source_frame_index_start: int = 0,
+        source_frame_stride: int = 1,
+        source_fps: Optional[float] = None,
     ) -> torch.Tensor:
-        """Normalize each raw depth frame using EMA-smoothed percentile bounds."""
-        if frames_bchw.shape[0] != depth_b1hw.shape[0]:
-            raise ValueError("Frame and depth batch sizes must match")
+        """Scale each frame against the global maximum, falling back to its p99."""
+        if not math.isfinite(global_depth_max) or global_depth_max <= 0:
+            raise ValueError("global_depth_max must be finite and greater than zero")
+        if source_frame_stride < 1:
+            raise ValueError("source_frame_stride must be >= 1")
 
         normalized = []
-        alpha = TEMPORAL_DEPTH_EMA
         for index in range(depth_b1hw.shape[0]):
             depth = depth_b1hw[index:index + 1]
-            frame = frames_bchw[index:index + 1].to(device=depth.device, dtype=torch.float32)
-            gray = (frame[:, 0:1] * 0.299 + frame[:, 1:2] * 0.587 + frame[:, 2:3] * 0.114)
-            cut_luma = F.interpolate(gray, size=(32, 32), mode="area").detach()
-
-            is_cut = False
-            if self._previous_cut_luma is not None:
-                is_cut = float((cut_luma - self._previous_cut_luma).abs().mean().item()) > cut_threshold
-            self._previous_cut_luma = cut_luma
-            if is_cut:
-                self._depth_range_ema = None
-
-            finite = torch.isfinite(depth)
-            values = depth[finite]
-            if values.numel() == 0:
-                if self._depth_range_ema is None:
-                    normalized.append(torch.nan_to_num(depth, nan=0.0, posinf=1.0, neginf=0.0))
-                else:
-                    low_ema, high_ema = self._depth_range_ema
-                    safe = torch.nan_to_num(depth, nan=low_ema, posinf=high_ema, neginf=low_ema)
-                    normalized.append(((safe - low_ema) / (high_ema - low_ema)).clamp(0.0, 1.0))
+            finite_values = depth[torch.isfinite(depth)].float()
+            if finite_values.numel() == 0:
+                safe_depth = torch.nan_to_num(depth, nan=0.0, posinf=global_depth_max, neginf=0.0)
+                normalized.append((safe_depth / global_depth_max).clamp(0.0, 1.0))
                 continue
 
-            q = torch.tensor(
-                [TEMPORAL_DEPTH_LOW_PERCENTILE / 100.0, TEMPORAL_DEPTH_HIGH_PERCENTILE / 100.0],
-                device=values.device,
-                dtype=torch.float32,
+            p99 = float(torch.quantile(finite_values, 0.99).item())
+            frame_max = global_depth_max
+            if p99 > global_depth_max:
+                frame_max = p99
+                source_frame_index = source_frame_index_start + index * source_frame_stride
+                frame_number = source_frame_index + 1
+                timestamp = (
+                    source_frame_index / source_fps
+                    if source_fps is not None and math.isfinite(source_fps) and source_fps > 0
+                    else None
+                )
+                if timestamp is None:
+                    LOGGER.warning(
+                        "Global depth normalization: source frame %d has p99 depth %.3f, "
+                        "above configured global maximum %.3f; scaling this frame to its p99.",
+                        frame_number,
+                        p99,
+                        global_depth_max,
+                    )
+                else:
+                    LOGGER.warning(
+                        "Global depth normalization: source frame %d (%.3f s) has p99 depth %.3f, "
+                        "above configured global maximum %.3f; scaling this frame to its p99.",
+                        frame_number,
+                        timestamp,
+                        p99,
+                        global_depth_max,
+                    )
+
+            safe_depth = torch.nan_to_num(
+                depth,
+                nan=0.0,
+                posinf=frame_max,
+                neginf=0.0,
             )
-            low, high = torch.quantile(values.float(), q).tolist()
-            if high - low <= 1e-6:
-                if self._depth_range_ema is None:
-                    normalized.append(self._normalize_depth(depth))
-                else:
-                    low_ema, high_ema = self._depth_range_ema
-                    safe = torch.nan_to_num(depth, nan=low_ema, posinf=high_ema, neginf=low_ema)
-                    normalized.append(((safe - low_ema) / (high_ema - low_ema)).clamp(0.0, 1.0))
-                continue
-
-            if self._depth_range_ema is None:
-                low_ema, high_ema = low, high
-            else:
-                old_low, old_high = self._depth_range_ema
-                low_ema = alpha * old_low + (1.0 - alpha) * low
-                high_ema = alpha * old_high + (1.0 - alpha) * high
-            if high_ema - low_ema <= 1e-6:
-                if self._depth_range_ema is None:
-                    normalized.append(self._normalize_depth(depth))
-                else:
-                    old_low, old_high = self._depth_range_ema
-                    safe = torch.nan_to_num(depth, nan=old_low, posinf=old_high, neginf=old_low)
-                    normalized.append(((safe - old_low) / (old_high - old_low)).clamp(0.0, 1.0))
-                continue
-
-            self._depth_range_ema = (low_ema, high_ema)
-            safe_depth = torch.nan_to_num(depth, nan=low_ema, posinf=high_ema, neginf=low_ema)
-            normalized.append(((safe_depth - low_ema) / (high_ema - low_ema)).clamp(0.0, 1.0))
+            normalized.append((safe_depth / frame_max).clamp(0.0, 1.0))
 
         return torch.cat(normalized, dim=0)
 
