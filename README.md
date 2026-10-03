@@ -30,7 +30,7 @@ Clone the repo into your ComfyUI `custom_nodes` directory:
 
 ```bash
 cd /path/to/ComfyUI/custom_nodes
-git clone https://github.com/oskar13/comfyui-sbs-long-video.git
+git clone https://github.com/richard-andrasek/comfyui-sbs-long-video
 ```
 
 Install the Python dependencies into the same environment that runs ComfyUI:
