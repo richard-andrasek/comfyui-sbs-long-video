@@ -31,6 +31,7 @@ class StereoVideoJob:
     frame_count: int = 0
     source_duration: float = 0.0
     output_depth_video: bool = False
+    depth_normalization_method: str = "simple"
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -56,6 +57,11 @@ class StereoVideoJob:
         payload.pop("depth_edge_radius", None)
         payload.pop("depth_edge_strength", None)
         payload.setdefault("output_depth_video", False)
+        payload.setdefault("depth_normalization_method", "simple")
+        # Ignore temporal tuning fields written by earlier development builds.
+        payload.pop("depth_temporal_ema", None)
+        payload.pop("depth_temporal_low_percentile", None)
+        payload.pop("depth_temporal_high_percentile", None)
         return cls(**payload)
 
 

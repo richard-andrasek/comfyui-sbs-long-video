@@ -126,6 +126,7 @@ Builds the video job definition.
 - `disparity_percent`: stereo separation as a percentage of image width (for example, `1.5` for 1.5%)
 - `depth_power`: depth response curve before reprojection
 - `invert_depth`: flips the inferred depth map
+- `depth_normalization_method`: `simple` keeps the current per-frame min/max normalization; `ema` smooths percentile-based depth bounds over time (2nd/98th percentiles, 0.95 EMA) to reduce stereo pumping; bounds reset at detected scene cuts
 - `audio_mode`: `copy` or `none`
 
 ### StereoVideoConvert

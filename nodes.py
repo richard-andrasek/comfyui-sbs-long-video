@@ -75,6 +75,10 @@ class StereoVideoSource:
                 "depth_power": ("FLOAT", {"default": 0.30, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
+                "depth_normalization_method": (
+                    ["simple", "ema"],
+                    {"default": "simple", "tooltip": "Depth normalization: simple preserves independent per-frame min/max normalization; ema smooths robust depth bounds over time to reduce stereo pumping."},
+                ),
                 "depth_edge_refine_method": (
                     ["none", "simple", "fgs"],
                     {
@@ -105,7 +109,10 @@ class StereoVideoSource:
         invert_depth: bool,
         audio_mode: str,
         depth_edge_refine_method: str = "none",
+        depth_normalization_method: str = "simple",
     ):
+        if depth_normalization_method not in ("simple", "ema"):
+            raise ValueError("depth_normalization_method must be 'simple' or 'ema'")
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
@@ -142,6 +149,7 @@ class StereoVideoSource:
             frame_count=spec.selected_frame_count,
             source_duration=source_duration,
             output_depth_video=bool(output_depth_video),
+            depth_normalization_method=depth_normalization_method,
         )
         return (job.to_handle(), _status_text(job))
 
@@ -179,6 +187,7 @@ class StereoVideoConvert:
         runner = DepthAnythingRunner(
             model_name=job.depth_model,
             inference_resolution=None if job.depth_use_source_resolution else job.depth_inference_resolution,
+            depth_normalization_method=job.depth_normalization_method,
         )
         renderer = GpuStereoRenderer(device=runner.device)
         progress = ProgressBar(job.frame_count) if ProgressBar is not None else None
