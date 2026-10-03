@@ -1,36 +1,28 @@
 # ComfyUI Stereo Long Video
 
-`ComfyUI Stereo Long Video` is a video-first custom node package for converting flat video into 3D stereoscopic output inside ComfyUI. Using the Depth Anything 3 AI model for depth estimation on a monocular input video. Resulting in a SBS or top/bottom stereo video that can be used on 3D displays. 
+`ComfyUI Stereo Long Video` is a video-first custom node package for converting flat (2D) video into 3D stereoscopic output inside ComfyUI. Using the Depth Anything 3 AI model for depth estimation on a monocular (flat) input video. Resulting in a SBS or top/bottom stereo video that can be used on 3D displays. 
 
-Instead of pushing long clips through image-batch workflows, this project treats video as a stream:
+Instead of loading the entire video and pushing it through image-batch workflows, this project treats video as a stream:
 
-- `ffmpeg` decodes frames in chunks
-- depth is estimated once per chunk with a long-lived runner
-- stereo reprojection happens on the GPU with `torch.grid_sample`
-- frames are streamed into an encoder instead of being kept in RAM
-- source audio can be muxed back into the final file
+- `ffmpeg` is used to break apart the video into chunks
+- Depth is estimated per chunk
+- Each frame is converted to 3D using the depth (reprojected)
+- Frames are streamed into a temporary file
+- Once all frames are complete, the audio is added back to the final 3D video
 
 ![screenshot](screenshot/nodes.png)
 
-## Purpose
-
-This project is meant for long-form stereo video generation in ComfyUI, especially where clip length, VRAM, and encode time make image-oriented nodes impractical.
-
-The repo currently ships three nodes:
-
-- `StereoVideoSource`
-- `StereoVideoConvert`
-- `StereoVideoMuxOutput`
-
 ## Why This Exists
 
-Most 2D-to-3D video workflows either process video as large image batches or rely on video-native depth models that can require substantial VRAM, especially at higher resolutions.
+Most 2D-to-3D video workflows either process video as large image batches or rely on video-native depth models that can require substantial system RAM or VRAM, especially at higher resolutions.
 
 This project targets a different use case: a memory-efficient SBS video converter for ComfyUI that can still run on low VRAM and RAM machines. It decodes video in chunks, runs per-frame depth estimation with Depth Anything, renders stereo on the GPU, and streams frames into the encoder instead of keeping the whole clip in memory.
 
 That design involves a tradeoff. Video-oriented depth models can deliver stronger temporal consistency, but they often demand more VRAM for higher-resolution inputs. This project instead prioritizes practical long-video conversion on modest hardware while still producing useful depth estimation and stereo output for higher-resolution material.
 
-A central goal was to implement GPU-based image processing for the heavy lifting so that conversion runs many times faster than CPU-bound alternatives. In practice, the pipeline works like this: **FFmpeg** decodes the source video in configurable chunks and feeds raw frames into the pipeline. Each chunk is moved to the GPU once; **Depth Anything** runs depth inference there. The **stereo reprojection** step then runs entirely on the GPU: depth is turned into per-pixel disparity, and left/right views are generated with `torch.grid_sample` (bilinear sampling). Hole-filling for disoccluded regions uses GPU `avg_pool2d` iterations. The resulting stereo frames are streamed straight into an **ffmpeg** encoder process via a pipe, so only one chunk lives in memory at a time. By keeping decode → depth → render → encode in a single streaming loop and doing all per-frame image work on the GPU, the converter avoids CPU-bound warping.
+To improve this, there are options for higher fidelity 3D processing, including Fast Global Smoothing to improve edge processing (increases processing time roughly 50%) and global depth normalization (no increase in processing time, but has a manual configuration).  These options improve quality to nearly the level of streaming-oriented techniques, without the significant hardware overhead.
+
+Conversely, options exist to dramatically improve generation time.  Edge refinement can be turned off or set to "simple" and inference resolution can be reduced to 12, allowing for both faster processing and reduced VRAM usage.  Finally, a "preview_mode" option allows for a storyboard mode where every 30th frame is rendered (roughly one new frame per second).  This allows you to convert the full video very quickly for use as testing the 3d mode. (Take the duration of the preview times 30 to get an estimate of the full processing time.)
 
 ## Installation
 
@@ -65,6 +57,16 @@ python -m pip install git+https://github.com/ByteDance-Seed/Depth-Anything-3.git
 - otherwise the plugin falls back to `transformers`-compatible checkpoints
 
 After installing dependencies, restart ComfyUI.
+
+## Nodes
+
+Since this processing is different than any other ComfyUI plugin, this repo currently ships three custom nodes:
+
+- `StereoVideoSource`
+- `StereoVideoConvert`
+- `StereoVideoMuxOutput`
+
+Due to the batching nature, these are incompatable with other ComfyUI nodes (such as the Video Helper Suite)
 
 ## Workflow
 
@@ -145,5 +147,3 @@ Writes the final deliverable.
 - `filename_prefix`: base name for the export
 - `output_format`: `mp4`, `webm`, or `mkv`
 - returns the final stereo path and, when enabled, the generated depth-video path
-
-
