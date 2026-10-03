@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
+import math
 from typing import Optional
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .depth_refinement import (
-    refine_depth_edges,
-    fast_global_smoother,
-)
+try:
+    from .depth_refinement import refine_depth_edges, fast_global_smoother
+except ImportError:
+    from depth_refinement import refine_depth_edges, fast_global_smoother
 
 
 MODEL_CANDIDATES = {
@@ -28,6 +30,8 @@ HF_MODEL_CANDIDATES = {
     "da3_large": ["depth-anything/Depth-Anything-V2-Large-hf"],
 }
 
+LOGGER = logging.getLogger(__name__)
+
 
 class DepthAnythingRunner:
     def __init__(
@@ -35,6 +39,8 @@ class DepthAnythingRunner:
         model_name: str = "da3_small",
         inference_resolution: Optional[int] = 518,
         device: Optional[torch.device] = None,
+        depth_normalization_method: str = "simple",
+        global_depth_max: float = 750.0,
     ) -> None:
         self.model_name = model_name
         self.inference_resolution = int(inference_resolution) if inference_resolution else None
@@ -45,6 +51,13 @@ class DepthAnythingRunner:
         self._pipeline = None
         self._api_backend = None
         self._model_id = None
+        self.depth_normalization_method = depth_normalization_method
+        self.global_depth_max = float(global_depth_max)
+
+        if depth_normalization_method not in ("simple", "global"):
+            raise ValueError("depth_normalization_method must be 'simple' or 'global'")
+        if not math.isfinite(self.global_depth_max) or self.global_depth_max <= 0:
+            raise ValueError("global_depth_max must be finite and greater than zero")
 
     def load(self) -> None:
         if self.model is not None or self._pipeline is not None or self._api_backend is not None:
@@ -130,6 +143,9 @@ class DepthAnythingRunner:
         frames_bchw: torch.Tensor,
         invert_depth: bool = False,
         edge_refine_method: str = "none",
+        source_frame_index_start: int = 0,
+        source_frame_stride: int = 1,
+        source_fps: Optional[float] = None,
     ) -> torch.Tensor:
 
         self.load()
@@ -137,15 +153,30 @@ class DepthAnythingRunner:
         inference_frames = self._prepare_inference_frames(frames_bchw)
 
         if self._api_backend is not None:
-            depth = self._infer_official_api(inference_frames, invert_depth=invert_depth)
+            depth = self._infer_official_api(inference_frames)
         elif self._pipeline is not None:
-            depth = self._infer_pipeline(inference_frames, invert_depth=invert_depth)
+            depth = self._infer_pipeline(inference_frames)
         else:
-            depth = self._infer_model(inference_frames, invert_depth=invert_depth)
+            depth = self._infer_model(inference_frames)
 
-        #return self._restore_depth_size(depth, original_size)
-
-        depth = self._restore_depth_size(depth, original_size)
+        if self.depth_normalization_method == "simple":
+            # Preserve established behavior: normalize and invert at model
+            # output size, then resize to the original video dimensions.
+            depth = self._normalize_depth(depth)
+            if invert_depth:
+                depth = 1.0 - depth
+            depth = self._restore_depth_size(depth, original_size)
+        else:
+            depth = self._restore_depth_size(depth, original_size)
+            depth = self._normalize_depth_global(
+                depth,
+                global_depth_max=self.global_depth_max,
+                source_frame_index_start=source_frame_index_start,
+                source_frame_stride=source_frame_stride,
+                source_fps=source_fps,
+            )
+            if invert_depth:
+                depth = 1.0 - depth
 
         if edge_refine_method != "none":
             if edge_refine_method == "simple":
@@ -192,15 +223,14 @@ class DepthAnythingRunner:
         target_w = max(1, int(round(width * scale)))
         return target_h, target_w
 
-    def _infer_official_api(self, frames_bchw: torch.Tensor, invert_depth: bool) -> torch.Tensor:
+    def _infer_official_api(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         frames = (frames_bchw.clamp(0, 1) * 255).byte().permute(0, 2, 3, 1).cpu().numpy()
         result = self._api_backend.inference(list(frames))
         depth = torch.from_numpy(np.asarray(result.depth)).float().unsqueeze(1)
         depth = depth.to(frames_bchw.device)
-        depth = self._normalize_depth(depth)
-        return 1.0 - depth if invert_depth else depth
+        return depth
 
-    def _infer_model(self, frames_bchw: torch.Tensor, invert_depth: bool) -> torch.Tensor:
+    def _infer_model(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         from PIL import Image
 
         frames = (frames_bchw.clamp(0, 1) * 255).byte().permute(0, 2, 3, 1).cpu().numpy()
@@ -214,10 +244,9 @@ class DepthAnythingRunner:
                 converted_inputs[key] = value.to(self.device)
         with torch.inference_mode():
             predicted = self.model(**converted_inputs).predicted_depth.unsqueeze(1)
-        depth = self._normalize_depth(predicted)
-        return 1.0 - depth if invert_depth else depth
+        return predicted
 
-    def _infer_pipeline(self, frames_bchw: torch.Tensor, invert_depth: bool) -> torch.Tensor:
+    def _infer_pipeline(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         from PIL import Image
         outputs = []
         frames = (frames_bchw.clamp(0, 1) * 255).byte().permute(0, 2, 3, 1).cpu().numpy()
@@ -229,8 +258,69 @@ class DepthAnythingRunner:
             depth = depth.float().unsqueeze(0).unsqueeze(0)
             outputs.append(depth)
         stacked = torch.cat(outputs, dim=0)
-        stacked = self._normalize_depth(stacked)
-        return 1.0 - stacked if invert_depth else stacked
+        return stacked
+
+    @staticmethod
+    def _normalize_depth_global(
+        depth_b1hw: torch.Tensor,
+        global_depth_max: float = 750.0,
+        source_frame_index_start: int = 0,
+        source_frame_stride: int = 1,
+        source_fps: Optional[float] = None,
+    ) -> torch.Tensor:
+        """Scale each frame against the global maximum, falling back to its p99."""
+        if not math.isfinite(global_depth_max) or global_depth_max <= 0:
+            raise ValueError("global_depth_max must be finite and greater than zero")
+        if source_frame_stride < 1:
+            raise ValueError("source_frame_stride must be >= 1")
+
+        normalized = []
+        for index in range(depth_b1hw.shape[0]):
+            depth = depth_b1hw[index:index + 1]
+            finite_values = depth[torch.isfinite(depth)].float()
+            if finite_values.numel() == 0:
+                safe_depth = torch.nan_to_num(depth, nan=0.0, posinf=global_depth_max, neginf=0.0)
+                normalized.append((safe_depth / global_depth_max).clamp(0.0, 1.0))
+                continue
+
+            p99 = float(torch.quantile(finite_values, 0.99).item())
+            frame_max = global_depth_max
+            if p99 > global_depth_max:
+                frame_max = p99
+                source_frame_index = source_frame_index_start + index * source_frame_stride
+                frame_number = source_frame_index + 1
+                timestamp = (
+                    source_frame_index / source_fps
+                    if source_fps is not None and math.isfinite(source_fps) and source_fps > 0
+                    else None
+                )
+                if timestamp is None:
+                    LOGGER.warning(
+                        "Global depth normalization: source frame %d has p99 depth %.3f, "
+                        "above configured global maximum %.3f; scaling this frame to its p99.",
+                        frame_number,
+                        p99,
+                        global_depth_max,
+                    )
+                else:
+                    LOGGER.warning(
+                        "Global depth normalization: source frame %d (%.3f s) has p99 depth %.3f, "
+                        "above configured global maximum %.3f; scaling this frame to its p99.",
+                        frame_number,
+                        timestamp,
+                        p99,
+                        global_depth_max,
+                    )
+
+            safe_depth = torch.nan_to_num(
+                depth,
+                nan=0.0,
+                posinf=frame_max,
+                neginf=0.0,
+            )
+            normalized.append((safe_depth / frame_max).clamp(0.0, 1.0))
+
+        return torch.cat(normalized, dim=0)
 
     @staticmethod
     def _normalize_depth(depth: torch.Tensor) -> torch.Tensor:

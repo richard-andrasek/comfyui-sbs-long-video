@@ -7,11 +7,6 @@ not hard requirements.  The pipeline with its basic settings works quite well, b
 
 ## Priorities
 
-* **Priority 1 - Node Improvement:** These nodes are all custom and they all suck. This should fix it.
-
-* **Priority 2 — Temporal depth normalization:** Reduce frame-to-frame depth pumping before
-  disparity calculation. Low computational cost and potentially significant visual benefit.
-
 * **Priority 3 — Temporal disparity stabilization:** Reduce stereo shimmer and small
   frame-to-frame disparity changes after depth-to-disparity conversion.
 
@@ -30,14 +25,6 @@ not hard requirements.  The pipeline with its basic settings works quite well, b
 
 ## Potential Improvements
 
-### Node Improvement
-
-Currently, we're using custom nodes for EVERY ASPECT of this pipeline.  That's fine, except it's not.
-
-Instead, we need to be able to integrate with other existing nodes, such as VHS or DepthAntyhing V3.  
-We can keep the Mux Output node, or whatever, but we should be using more standard pipeline, 
-rather than have EVERY SINGLE THING custom.
-
 ### Joint bilateral edge refinement
 
 An alternative to the Fast Global Smoother (FGS) already implemented. A joint bilateral
@@ -55,27 +42,6 @@ Potential controls:
 - `depth_edge_sigma_space`: spatial smoothing radius
 
 Implementation should remain entirely in PyTorch/CUDA to avoid CPU transfers.
-
-### Temporal depth normalization
-
-Normalize depth consistently across frames rather than independently normalizing each
-frame. Independent normalization can cause the apparent depth range to fluctuate from
-frame to frame even when the scene itself has not changed.
-
-A temporal normalization approach can maintain running depth statistics using an
-exponential moving average (EMA). Percentile-based normalization, such as the 2nd and
-98th percentiles, can reduce the influence of extreme depth values.
-
-This should reduce temporal "breathing" or pumping in stereo separation and may make the
-depth produced by DA3 more consistent before it reaches the stereo renderer.
-
-Potential controls:
-- `depth_temporal_normalize`: on/off
-- `depth_temporal_ema`: approximately 0.9-0.99
-- `depth_temporal_low_percentile`: approximately 2
-- `depth_temporal_high_percentile`: approximately 98
-
-This is expected to be relatively inexpensive compared with DA3 or FGS.
 
 ### Temporal disparity stabilization
 

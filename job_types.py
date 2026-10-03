@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 from typing import Any, Dict, Optional
 
 try:
@@ -31,6 +32,8 @@ class StereoVideoJob:
     frame_count: int = 0
     source_duration: float = 0.0
     output_depth_video: bool = False
+    depth_normalization_method: str = "simple"
+    global_depth_max: float = 750.0
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -56,6 +59,18 @@ class StereoVideoJob:
         payload.pop("depth_edge_radius", None)
         payload.pop("depth_edge_strength", None)
         payload.setdefault("output_depth_video", False)
+        payload.setdefault("depth_normalization_method", "simple")
+        if payload.get("depth_normalization_method") == "ema":
+            payload["depth_normalization_method"] = "simple"
+        payload.setdefault("global_depth_max", 750.0)
+        global_depth_max = float(payload["global_depth_max"])
+        if not math.isfinite(global_depth_max) or global_depth_max <= 0:
+            raise ValueError("global_depth_max must be finite and greater than zero")
+        payload["global_depth_max"] = global_depth_max
+        # Ignore temporal tuning fields written by earlier development builds.
+        payload.pop("depth_temporal_ema", None)
+        payload.pop("depth_temporal_low_percentile", None)
+        payload.pop("depth_temporal_high_percentile", None)
         return cls(**payload)
 
 
