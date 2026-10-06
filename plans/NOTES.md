@@ -7,14 +7,8 @@ not hard requirements.  The pipeline with its basic settings works quite well, b
 
 ## Priorities
 
-* **Priority 3 — Temporal disparity stabilization:** Reduce stereo shimmer and small
-  frame-to-frame disparity changes after depth-to-disparity conversion.
-
 * **Priority 4 — Z-buffer DIBR:** Improve visibility/occlusion handling during stereo
   reprojection and reduce foreground/background overlap artifacts.
-
-* **Priority 5 — Joint bilateral edge refinement:** Add as an alternative to FGS for
-  comparison and potentially better handling of certain fine edges and textures.
 
 * **Priority 6 — Hole-filling strategy:** Improve disocclusion filling, particularly after
   implementing Z-buffer DIBR.
@@ -22,45 +16,47 @@ not hard requirements.  The pipeline with its basic settings works quite well, b
 * **Priority 7 — Particle-depth correction:** Address isolated rain, snow, dust, or similar
   objects receiving implausible foreground depth. Useful, but relatively specialized.
 
+## THINGS THAT DIDN'T WORK
 
-## Potential Improvements
+### EMA / "Flicker reduction"
+
+It's nice in theory and had a practical effect of actually reducing flicker in the generated depth map.  
+However, in the long run, the global depth map was far, far more successfull
+
+### Global Depth Normalization across the screen
+
+So, in theory, 3d movies should be able to pop out at you.  But in practice, this process didn't work
+so well with the model (Depth Anything V3 on global depth normalization) that I am using. As such, I scrapped that
+plan.  (The problem: it gave nasty artifacts when protruding "outwards".)  Real studioes use much better
+depth planning or manual depth generation (or true 3d rendering) for such effects
+
+### Convergence Plane
+
+This is related to the convergence plane...the above is what I actually tried to implement and what failed.
+In theory, I could give the Convergence Plane a go, allowing a movie to be "shifted outwards" from the screen.
+But in my testing, I didn't feel like the juice was worth the squeeze.  The addition of artifacts was highly 
+undesirable.  And I didn't feel like fighting through that to get it working, only to have all the movies 
+effectively shifted forward only a tiny fraction.  In otherwards, what we have so far is great and this
+concept wouldn't have made it better.
+
+### Auto-convergence / zero-parallax calculation
+
+This is directly related, but even worse. The problem is that auto-convergence could cause "depth pumping",
+given that this is a frame-to-frame rendering.  As such, this process is more likely to fail the succeed. Skip it.
 
 ### Joint bilateral edge refinement
 
-An alternative to the Fast Global Smoother (FGS) already implemented. A joint bilateral
-filter would use the RGB frame as a guide while smoothing the DA3 depth map. Nearby
-pixels are allowed to influence one another based on both spatial distance and RGB
-similarity, reducing depth bleeding across strong object boundaries.
-
-This may produce slightly different results from FGS, particularly around fine details,
-hair, and textured surfaces. It is worth implementing as an alternative refinement method
-rather than replacing FGS.
-
-Potential controls:
-- `depth_edge_method`: `fgs` / `joint_bilateral`
-- `depth_edge_sigma_color`: sensitivity to RGB differences
-- `depth_edge_sigma_space`: spatial smoothing radius
-
-Implementation should remain entirely in PyTorch/CUDA to avoid CPU transfers.
+The Fast Global Smoothing does a good job. I'm not convinced that this will be a better option.
 
 ### Temporal disparity stabilization
 
-Apply temporal smoothing after depth has been converted into stereo disparity. The goal
-is to suppress small frame-to-frame changes in disparity that are not perceptually
-meaningful but can cause visible stereo shimmer or depth pumping.
+DepthAnythingV3 upgrade solved this.  This is unneeded.
 
-An EMA or similar low-pass filter could blend the current disparity with the previous
-frame while preserving larger intentional changes.
+### Softmax splatting / depth-aware forward warp
 
-This should be applied after the depth response curve and disparity calculation so that
-it stabilizes the quantity that actually controls horizontal stereo displacement.
+This is an alternative to Z-buffer DIBR.  However, it could cause artifacts and isn't as good as the other. So, skip it.
 
-Potential controls:
-- `temporal_disparity_stability`: on/off
-- `temporal_disparity_strength`: approximately 0.05-0.25
-
-Care should be taken around genuine scene changes, cuts, and fast camera movement. A
-strong temporal filter could introduce lag or ghosting if it is too aggressive.
+## Potential Improvements
 
 ### Z-buffer DIBR
 
@@ -122,47 +118,23 @@ A useful implementation would probably combine connected-component/area tests wi
 local depth statistics rather than relying solely on object size.
 
 
-## Other Possible Improvements:
+### 3 Depth Layers of Snow
 
-These are some concepts from SBSCrafter:
-https://github.com/cnkanwei/ComfyUI-SBSCrafter
+This is an improvement to the particle-depth correction with increased cost.
 
-### Softmax splatting / depth-aware forward warp
+Generate:
 
-Replace or augment `grid_sample` with depth-aware forward warping so overlapping pixels
-are resolved according to depth, improving occlusion handling and stereo boundaries.
+foreground
+midground
+background
 
-### Depth-adaptive blend radius
+particle depth.
 
-Adjust hole/blend feathering based on scene depth rather than using a fixed radius, which
-can produce cleaner transitions around foreground objects and disocclusions.
+This should make the stereoscopic effect dramatically better
+
 
 ### Reinhard-style ring color matching
 
 Match the color characteristics of filled regions to the surrounding image, reducing
 visible seams caused by differences in brightness, contrast, or color.
 
-### small_hole_px
-
-Detect small reprojection holes and cracks separately from larger disocclusions, allowing
-them to be filled cheaply without invoking more expensive processing.
-
-### keep_original_left/right
-
-Keep one eye pixel-exact and synthesize only the other eye, reducing processing and
-avoiding unnecessary interpolation artifacts in the preserved view.
-
-### Auto-convergence / zero-parallax calculation
-
-Automatically determine a suitable reference depth plane so that the stereo image has
-consistent convergence without requiring manual adjustment for every scene.
-
-### Resolution-independent disparity (Percentage based, rather than pixel-based)
-
-Express stereo separation as a percentage of image width so the same setting produces
-consistent stereo strength across different output resolutions.
-
-### Particle Depth Fix
-
-Detect small isolated objects such as rain, snow, or dust that receive implausible
-foreground depth and replace them with an estimate of the surrounding background depth.
