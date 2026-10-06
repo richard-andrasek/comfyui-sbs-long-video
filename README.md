@@ -132,6 +132,14 @@ Builds the video job definition.
 - `global_depth_max`: depth range maximum for `global` mode (default `750`); watch the console for p99 warnings and increase this value if you see many
 - `audio_mode`: `copy` or `none`
 
+### Particle Effects Config
+
+Connect this node's `particle_effects_config` output to the optional input on `Stereo Video Source` to provide particle detector and depth settings. Enable the effect with `enable_particle_depth` on `Stereo Video Source`. If the config is unconnected, the built-in tuning defaults are used.
+
+- Detector controls: brightness and saturation thresholds, minimum and maximum connected area, and mask blur
+- Depth controls: relative or absolute mode, depth and offset ranges, and blend strength
+- `particle_debug_video`: optionally export a five-panel video showing source, normalized depth, particle mask, synthetic depth, and combined depth
+
 ### StereoVideoConvert
 
 Executes the job.

@@ -9,11 +9,12 @@ from typing import Optional
 import torch
 
 try:
-    from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
+    from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE, PARTICLE_EFFECTS_CONFIG_TYPE
     from .depth_runner import DepthAnythingRunner
     from .encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from .job_types import StereoVideoJob, StereoVideoRender
     from .stereo_renderer import GpuStereoRenderer
+    from .particle_depth import detect_particle_mask, apply_particle_depth
     from .video_io import (
         FFmpegChunkDecoder,
         cleanup_temp_dir,
@@ -24,11 +25,12 @@ try:
         select_video_spec,
     )
 except ImportError:
-    from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
+    from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE, PARTICLE_EFFECTS_CONFIG_TYPE
     from depth_runner import DepthAnythingRunner
     from encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from job_types import StereoVideoJob, StereoVideoRender
     from stereo_renderer import GpuStereoRenderer
+    from particle_depth import detect_particle_mask, apply_particle_depth
     from video_io import (
         FFmpegChunkDecoder,
         cleanup_temp_dir,
@@ -50,6 +52,90 @@ def _status_text(job: StereoVideoJob) -> str:
         f"{job.frame_count} frames at {job.target_fps:.3f} fps, "
         f"{job.width}x{job.height}, depth_model={job.depth_model}, layout={job.stereo_layout}"
     )
+
+
+_DEFAULT_PARTICLE_EFFECTS = {
+    "particle_brightness_threshold": 0.85,
+    "particle_saturation_threshold": 0.25,
+    "particle_min_area": 1,
+    "particle_max_area": 200,
+    "particle_depth_min": 0.02,
+    "particle_depth_max": 1.0,
+    "particle_depth_offset_min": 0.05,
+    "particle_depth_offset_max": 0.30,
+    "particle_mask_blur": 1.0,
+    "particle_depth_strength": 1.0,
+    "particle_depth_mode": "relative",
+    "particle_debug_video": False,
+}
+
+
+class ParticleEffectsConfig:
+    DESCRIPTION = "Configures optional particle depth effects for Stereo Video Source."
+    RETURN_TYPES = (PARTICLE_EFFECTS_CONFIG_TYPE,)
+    RETURN_NAMES = ("particle_effects_config",)
+    FUNCTION = "build_config"
+    CATEGORY = CATEGORY
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "brightness_threshold": ("FLOAT", {"default": 0.85, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "saturation_threshold": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "particle_min_area": ("INT", {"default": 1, "min": 1, "max": 10000}),
+            "particle_max_area": ("INT", {"default": 200, "min": 1, "max": 100000}),
+            "particle_depth_min": ("FLOAT", {"default": 0.02, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "particle_depth_max": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "particle_depth_offset_min": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "particle_depth_offset_max": ("FLOAT", {"default": 0.30, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "particle_mask_blur": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1}),
+            "particle_depth_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+            "particle_depth_mode": (["relative", "absolute"], {"default": "relative"}),
+            "particle_debug_video": ("BOOLEAN", {"default": False}),
+        }}
+
+    def build_config(
+        self, brightness_threshold, saturation_threshold,
+        particle_min_area, particle_max_area, particle_depth_min, particle_depth_max,
+        particle_depth_offset_min, particle_depth_offset_max, particle_mask_blur,
+        particle_depth_strength, particle_depth_mode, particle_debug_video,
+    ):
+        values = dict(_DEFAULT_PARTICLE_EFFECTS)
+        values.update({
+            "particle_brightness_threshold": float(brightness_threshold),
+            "particle_saturation_threshold": float(saturation_threshold),
+            "particle_min_area": int(particle_min_area),
+            "particle_max_area": int(particle_max_area),
+            "particle_depth_min": float(particle_depth_min),
+            "particle_depth_max": float(particle_depth_max),
+            "particle_depth_offset_min": float(particle_depth_offset_min),
+            "particle_depth_offset_max": float(particle_depth_offset_max),
+            "particle_mask_blur": float(particle_mask_blur),
+            "particle_depth_strength": float(particle_depth_strength),
+            "particle_depth_mode": particle_depth_mode,
+            "particle_debug_video": bool(particle_debug_video),
+        })
+        _validate_particle_effects(values)
+        values["type"] = PARTICLE_EFFECTS_CONFIG_TYPE
+        values["version"] = 1
+        return (values,)
+
+
+def _validate_particle_effects(values):
+    if not 0 <= values["particle_brightness_threshold"] <= 1 or not 0 <= values["particle_saturation_threshold"] <= 1:
+        raise ValueError("Particle brightness and saturation thresholds must be in [0, 1]")
+    if values["particle_min_area"] < 1 or values["particle_max_area"] < values["particle_min_area"]:
+        raise ValueError("Particle area limits must satisfy 1 <= min_area <= max_area")
+    if not 0 <= values["particle_depth_min"] <= values["particle_depth_max"] <= 1:
+        raise ValueError("Particle depth limits must satisfy 0 <= min <= max <= 1")
+    if not 0 <= values["particle_depth_offset_min"] <= values["particle_depth_offset_max"] <= 1:
+        raise ValueError("Particle depth offsets must satisfy 0 <= min <= max <= 1")
+    if not math.isfinite(values["particle_mask_blur"]) or values["particle_mask_blur"] < 0:
+        raise ValueError("Particle mask blur must be finite and non-negative")
+    if not math.isfinite(values["particle_depth_strength"]) or not 0 <= values["particle_depth_strength"] <= 1:
+        raise ValueError("Particle depth strength must be in [0, 1]")
+    if values["particle_depth_mode"] not in ("relative", "absolute"):
+        raise ValueError("Particle depth mode must be 'relative' or 'absolute'")
 
 
 class StereoVideoSource:
@@ -88,6 +174,10 @@ class StereoVideoSource:
                         "tooltip": "Depth refinement method: none disables refinement, simple uses local RGB edge-aware smoothing, and fgs uses Fast Global Smoother based refinement.",
                     },
                 ),
+                "enable_particle_depth": ("BOOLEAN", {"default": False, "tooltip": "Enable the particle depth settings from the optional Particle Effects Config input."}),
+            },
+            "optional": {
+                "particle_effects_config": (PARTICLE_EFFECTS_CONFIG_TYPE, {"tooltip": "Optional particle effects settings. Defaults are used when unconnected."}),
             },
         }
 
@@ -113,11 +203,17 @@ class StereoVideoSource:
         depth_edge_refine_method: str = "none",
         depth_normalization_method: str = "simple",
         global_depth_max: float = 750.0,
+        enable_particle_depth: bool = False,
+        particle_effects_config=None,
     ):
         if depth_normalization_method not in ("simple", "global"):
             raise ValueError("depth_normalization_method must be 'simple' or 'global'")
         if not math.isfinite(float(global_depth_max)) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
+        particle_effects = dict(_DEFAULT_PARTICLE_EFFECTS)
+        if isinstance(particle_effects_config, dict) and particle_effects_config.get("type") == PARTICLE_EFFECTS_CONFIG_TYPE:
+            particle_effects.update({key: value for key, value in particle_effects_config.items() if key in particle_effects})
+        _validate_particle_effects(particle_effects)
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
@@ -156,6 +252,8 @@ class StereoVideoSource:
             output_depth_video=bool(output_depth_video),
             depth_normalization_method=depth_normalization_method,
             global_depth_max=global_depth_max,
+            enable_particle_depth=bool(enable_particle_depth),
+            **particle_effects,
         )
         return (job.to_handle(), _status_text(job))
 
@@ -188,6 +286,7 @@ class StereoVideoConvert:
         temp_dir = get_temp_dir()
         temp_video_path = os.path.join(temp_dir, "rendered_video.mp4")
         temp_depth_video_path = os.path.join(temp_dir, "generated_depth.mkv") if job.output_depth_video else None
+        temp_particle_debug_path = os.path.join(temp_dir, "particle_depth_debug.mp4") if job.particle_debug_video else None
 
         runner = None
         runner = DepthAnythingRunner(
@@ -219,6 +318,14 @@ class StereoVideoConvert:
                         fps=job.target_fps,
                     )
                 )
+                debug_encoder = stack.enter_context(
+                    StreamingVideoEncoder(
+                        output_path=temp_particle_debug_path,
+                        width=job.width * 5,
+                        height=job.height,
+                        fps=job.target_fps,
+                    )
+                ) if temp_particle_debug_path else None
 
                 for source_chunk in source_decoder:
                     frames = torch.from_numpy(source_chunk).float() / 255.0
@@ -230,6 +337,37 @@ class StereoVideoConvert:
                         source_frame_stride=job.every_nth,
                         source_fps=job.source_fps,
                     )
+                    scene_depth = depth
+
+                    particle_mask = synthetic_depth = None
+                    if job.enable_particle_depth or debug_encoder is not None:
+                        particle_mask = detect_particle_mask(
+                            frames,
+                            brightness_threshold=job.particle_brightness_threshold,
+                            saturation_threshold=job.particle_saturation_threshold,
+                            min_area=job.particle_min_area,
+                            max_area=job.particle_max_area,
+                            mask_blur=job.particle_mask_blur,
+                        )
+                        if job.enable_particle_depth:
+                            depth, synthetic_depth = apply_particle_depth(
+                                depth, particle_mask,
+                                depth_min=job.particle_depth_min,
+                                depth_max=job.particle_depth_max,
+                                offset_min=job.particle_depth_offset_min,
+                                offset_max=job.particle_depth_offset_max,
+                                strength=job.particle_depth_strength,
+                                mode=job.particle_depth_mode,
+                                frame_index_start=processed_frames * job.every_nth,
+                            )
+                        else:
+                            synthetic_depth = depth
+
+                    if debug_encoder is not None:
+                        def gray(depth_map):
+                            return depth_map.clamp(0, 1).squeeze(1).unsqueeze(-1).expand(-1, -1, -1, 3)
+                        debug_frames = torch.cat((frames, gray(scene_depth), particle_mask.squeeze(1).unsqueeze(-1).expand(-1, -1, -1, 3), gray(synthetic_depth), gray(depth)), dim=2)
+                        debug_encoder.write_frames(debug_frames.detach().cpu().numpy())
 
                     if depth_encoder is not None:
                         depth_encoder.write_depth(depth)
@@ -261,6 +399,7 @@ class StereoVideoConvert:
             height=render_height,
             stereo_layout=job.stereo_layout,
             temp_depth_video_path=temp_depth_video_path,
+            temp_particle_debug_path=temp_particle_debug_path,
         )
         return (render.to_handle(), f"Rendered {processed_frames} frames to temp video")
 
@@ -268,7 +407,7 @@ class StereoVideoConvert:
 
 class StereoVideoMuxOutput:
     DESCRIPTION = "Finalizes the rendered temp video, optionally muxes audio, and saves the output with an auto-incremented filename."
-    OUTPUT_TOOLTIPS = ["Final saved stereo video path.", "Final saved generated depth-video path, or empty when depth export was not enabled."]
+    OUTPUT_TOOLTIPS = ["Final saved stereo video path.", "Final saved generated depth-video path, or empty when depth export was not enabled.", "Final saved five-panel particle diagnostic video, or empty when disabled."]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -280,8 +419,8 @@ class StereoVideoMuxOutput:
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("output_path", "depth_output_path")
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("output_path", "depth_output_path", "particle_debug_path")
     FUNCTION = "mux"
     CATEGORY = CATEGORY
     OUTPUT_NODE = True
@@ -300,21 +439,27 @@ class StereoVideoMuxOutput:
                 stereo_layout=render.stereo_layout,
             )
             depth_finalized = ""
+            debug_finalized = ""
             if render.temp_depth_video_path:
                 depth_finalized = resolve_output_prefix(f"{filename_prefix}_depth", "mkv")
                 shutil.move(render.temp_depth_video_path, depth_finalized)
+            if render.temp_particle_debug_path:
+                debug_finalized = resolve_output_prefix(f"{filename_prefix}_particle_debug", "mp4")
+                shutil.move(render.temp_particle_debug_path, debug_finalized)
         finally:
             cleanup_temp_dir(render.cleanup_dir)
-        return (finalized, depth_finalized)
+        return (finalized, depth_finalized, debug_finalized)
 
 
 NODE_CLASS_MAPPINGS = {
+    "ParticleEffectsConfig": ParticleEffectsConfig,
     "StereoVideoSource": StereoVideoSource,
     "StereoVideoConvert": StereoVideoConvert,
     "StereoVideoMuxOutput": StereoVideoMuxOutput,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "ParticleEffectsConfig": "Particle Effects Config",
     "StereoVideoSource": "Stereo Video Source",
     "StereoVideoConvert": "Stereo Video Convert",
     "StereoVideoMuxOutput": "Stereo Video Mux Output",

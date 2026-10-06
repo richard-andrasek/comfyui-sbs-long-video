@@ -34,6 +34,19 @@ class StereoVideoJob:
     output_depth_video: bool = False
     depth_normalization_method: str = "simple"
     global_depth_max: float = 750.0
+    enable_particle_depth: bool = False
+    particle_brightness_threshold: float = 0.85
+    particle_saturation_threshold: float = 0.25
+    particle_min_area: int = 1
+    particle_max_area: int = 200
+    particle_depth_min: float = 0.02
+    particle_depth_max: float = 1.0
+    particle_depth_offset_min: float = 0.05
+    particle_depth_offset_max: float = 0.30
+    particle_mask_blur: float = 1.0
+    particle_depth_strength: float = 1.0
+    particle_depth_mode: str = "relative"
+    particle_debug_video: bool = False
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -63,6 +76,23 @@ class StereoVideoJob:
         if payload.get("depth_normalization_method") == "ema":
             payload["depth_normalization_method"] = "simple"
         payload.setdefault("global_depth_max", 750.0)
+        particle_defaults = {
+            "enable_particle_depth": False,
+            "particle_brightness_threshold": 0.85,
+            "particle_saturation_threshold": 0.25,
+            "particle_min_area": 1,
+            "particle_max_area": 200,
+            "particle_depth_min": 0.02,
+            "particle_depth_max": 1.0,
+            "particle_depth_offset_min": 0.05,
+            "particle_depth_offset_max": 0.30,
+            "particle_mask_blur": 1.0,
+            "particle_depth_strength": 1.0,
+            "particle_depth_mode": "relative",
+            "particle_debug_video": False,
+        }
+        for key, value in particle_defaults.items():
+            payload.setdefault(key, value)
         global_depth_max = float(payload["global_depth_max"])
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
@@ -88,6 +118,7 @@ class StereoVideoRender:
     height: int
     stereo_layout: str
     temp_depth_video_path: Optional[str] = None
+    temp_particle_debug_path: Optional[str] = None
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -103,4 +134,5 @@ class StereoVideoRender:
         payload.pop("type", None)
         payload.pop("version", None)
         payload.setdefault("temp_depth_video_path", None)
+        payload.setdefault("temp_particle_debug_path", None)
         return cls(**payload)

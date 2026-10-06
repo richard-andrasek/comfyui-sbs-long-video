@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 JOB_TYPE = "STEREO_VIDEO_JOB"
 RENDER_TYPE = "STEREO_VIDEO_RENDER"
+PARTICLE_EFFECTS_CONFIG_TYPE = "particle_effects_config"
 CATEGORY = "Stereo Video"
 
 
