@@ -1,6 +1,4 @@
-Absolutely. For **V1**, I'd keep this deliberately conservative: don't change the stereo renderer at all. Add a particle mask, synthesize particle depth, and inject that depth into the existing DA3 depth map immediately before stereo rendering.
 
-```
 V1 — Snow / Particle Depth Override
 ====================================
 
@@ -124,7 +122,7 @@ which makes the particle appear in FRONT of the surface underneath it.
 Suggested initial values:
 
     MIN_OFFSET = 0.05
-    MAX_OFFSET = 0.35
+    MAX_OFFSET = 0.85
 
 Clamp:
 
@@ -460,4 +458,3 @@ That gives us a clean A/B test:
 If V1 produces noticeably more natural stereoscopic snow, we know the
 hypothesis is correct before investing in a more sophisticated
 particle/3D system.
-```

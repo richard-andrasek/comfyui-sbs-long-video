@@ -138,6 +138,7 @@ class DepthAnythingRunner:
                 f"Failed to load Depth Anything model '{self.model_name}' via transformers fallback. {message}"
             )
 
+    @torch.inference_mode()
     def infer(
         self,
         frames_bchw: torch.Tensor,

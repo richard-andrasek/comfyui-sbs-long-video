@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 
 
+@torch.inference_mode()
 def detect_particle_mask(
     frames_bhwc: torch.Tensor,
     brightness_threshold: float = 0.85,
@@ -22,31 +23,42 @@ def detect_particle_mask(
     if mask_blur < 0 or not math.isfinite(mask_blur):
         raise ValueError("particle_mask_blur must be finite and non-negative")
 
-    rgb = frames_bhwc[..., :3].float().clamp(0, 1)
-    maximum = rgb.max(dim=-1).values
-    minimum = rgb.min(dim=-1).values
-    saturation = torch.where(maximum > 1e-6, (maximum - minimum) / maximum.clamp_min(1e-6), 0)
-    brightness = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
-    candidates = (brightness > brightness_threshold) & (saturation < saturation_threshold)
-
-    # OpenCV is available in most ComfyUI installations. Use connected components
-    # when present to reject broad highlights and isolated single-pixel noise.
+    # Work one frame at a time. Keeping RGB, brightness, saturation, and candidate
+    # images for a whole decoded chunk multiplies peak RAM use at high resolutions.
     try:
         import cv2
-        cleaned = []
-        for candidate in candidates.detach().cpu().numpy().astype(np.uint8):
+    except ImportError:
+        cv2 = None
+
+    masks = []
+    for frame in frames_bhwc:
+        rgb = frame[..., :3].float().clamp_(0, 1)
+        maximum = rgb.max(dim=-1).values
+        minimum = rgb.min(dim=-1).values
+        saturation = (maximum - minimum) / maximum.clamp_min_(1e-6)
+        saturation = torch.where(maximum > 1e-6, saturation, 0)
+        brightness = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+        candidates = (brightness > brightness_threshold) & (saturation < saturation_threshold)
+        del rgb, maximum, minimum, saturation, brightness
+
+        if cv2 is not None:
+            candidate = candidates.detach().to(device="cpu", dtype=torch.uint8).numpy()
             count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate, connectivity=8)
-            keep = np.zeros_like(candidate, dtype=np.float32)
+            keep = np.zeros(candidate.shape, dtype=np.float32)
             for label in range(1, count):
                 area = int(stats[label, cv2.CC_STAT_AREA])
                 if min_area <= area <= max_area:
                     keep[labels == label] = 1.0
-            cleaned.append(keep)
-        mask = torch.from_numpy(np.stack(cleaned)).to(device=frames_bhwc.device, dtype=torch.float32).unsqueeze(1)
-    except ImportError:
-        # Dependency-free fallback retains candidates; connected-component area
-        # filtering is applied when OpenCV is available in the ComfyUI runtime.
-        mask = candidates.float().unsqueeze(1)
+            frame_mask = torch.from_numpy(keep).to(device=frames_bhwc.device).unsqueeze(0).unsqueeze(0)
+            del candidate, keep, labels, stats
+        else:
+            # Dependency-free fallback retains candidates; area filtering is
+            # applied when OpenCV is available in the ComfyUI runtime.
+            frame_mask = candidates.to(dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        del candidates
+        masks.append(frame_mask)
+
+    mask = torch.cat(masks, dim=0)
 
     if mask_blur > 0:
         radius = max(1, int(math.ceil(mask_blur * 2)))
@@ -58,6 +70,7 @@ def detect_particle_mask(
     return mask
 
 
+@torch.inference_mode()
 def apply_particle_depth(
     scene_depth_b1hw: torch.Tensor,
     particle_mask_b1hw: torch.Tensor,

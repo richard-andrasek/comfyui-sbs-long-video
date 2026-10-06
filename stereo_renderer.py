@@ -8,6 +8,7 @@ class GpuStereoRenderer:
     def __init__(self, device: torch.device | None = None) -> None:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    @torch.inference_mode()
     def render(
         self,
         frames_bhwc: torch.Tensor,
