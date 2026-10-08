@@ -88,7 +88,7 @@ frame 141688 (6039.283 s): (P99: 891.500) (max: 1034.721) (>750: 0.183%)
 **NOTE 2: (leaky) COUNT:**
 To accomplish this adaptation, we don't want to increase the global max every tiem we have a p99 over the configured value.
 
-Instead, we want to count 24 frames.  If we have 24 frames that exceed the p99, then we'll increase the global_max_depth.  
+Instead, we want to count 20 frames.  If we have 20 frames that exceed the p99, then we'll increase the global_max_depth.  
 However, we don't want to wait 30 minutes into the movie and increase it...To prevent this, we'll have a "leaky counter".
 
 Specifically:
@@ -96,29 +96,32 @@ Specifically:
 leaky_ratio = 30;  // 30 good frames will reduce 1 bad frame
 if p99 > global_max_depth:
     over_counter += leaky_ratio; 
-    max_p99 = p99;
+    max_p99 = max(max_p99, p99);
 else:
     over_counter -= 1;
-if(over_counter > 24 * leaky_ratio):
+if(over_counter > 20 * leaky_ratio):  //20 bad frames = re-adjust
     adjust_global_max_depth();  
 
 **NOTE 3: Slow adjustment of global_depth_max**
-We also don't want our global depth max to go from the initial 750 all the way to 900 (or some ridiculous value).
+We also don't want our global depth max to go from the initial 750 instantly to 900 (or some extreme value).
 
 To prevent this, we'll have a slow scale out:
 
-global_depth_max += Math.floor((max_p99 - global_depth) * 0.25);
+global_depth_max += Math.floor((max_p99 - global_depth_max) / 4);
 
-So a 900 max p99 with a current max of 750 would be:  750 + ((900 - 750) * 0.25)... 787.
+So if we saw a 900 max p99 with a current max of 750 would be:  750 + ((900 - 750) / 4)... 787.
 
-If it's still to low, the next one may take it up to 800..or 815.
+If it's still at 900, the next one will take it up to 815.
 
 If someone sets this global value to 300, for example, within the first second it will go to:
-300 + (650-300)* 0.25 = 387.
-then (by the 2nd second):
-387 + (650-387) * 0.25 = 452
+300 + ((725-300)/4) = 406
 
-This will slowly approach reasonable values over the course of a few minutes, staying at this value throughout the rest of the video.
+This will slowly approach reasonable values over the course of several seconds/minutes, staying at this value throughout the rest of the video.
+
+**NOTE 4: Expose this as an option:**
+For depth_noramalization_method, the "global" option should be a hard-global, clamping anything over the max.
+
+This new process should be called "adaptive global".  This option should be exposed to the UI as another option in the dropdown list.
 
 ### Temporal disparity stabilization
 

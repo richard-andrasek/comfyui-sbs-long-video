@@ -40,7 +40,7 @@ class DepthAnythingRunner:
         inference_resolution: Optional[int] = 518,
         device: Optional[torch.device] = None,
         depth_normalization_method: str = "simple",
-        global_depth_max: float = 750.0,
+        global_depth_max: float = 850.0,
     ) -> None:
         self.model_name = model_name
         self.inference_resolution = int(inference_resolution) if inference_resolution else None
@@ -53,9 +53,14 @@ class DepthAnythingRunner:
         self._model_id = None
         self.depth_normalization_method = depth_normalization_method
         self.global_depth_max = float(global_depth_max)
+        self._adaptive_global_state = {
+            "over_counter": 0,
+            "max_p99": 0.0,
+            "global_depth_max": self.global_depth_max,
+        }
 
-        if depth_normalization_method not in ("simple", "global"):
-            raise ValueError("depth_normalization_method must be 'simple' or 'global'")
+        if depth_normalization_method not in ("simple", "global", "adaptive global"):
+            raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
         if not math.isfinite(self.global_depth_max) or self.global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
 
@@ -174,7 +179,10 @@ class DepthAnythingRunner:
                 source_frame_index_start=source_frame_index_start,
                 source_frame_stride=source_frame_stride,
                 source_fps=source_fps,
+                should_adapt_global_max=self.depth_normalization_method == "adaptive global",
+                adaptive_state=self._adaptive_global_state,
             )
+            self.global_depth_max = self._adaptive_global_state["global_depth_max"]
             if invert_depth:
                 depth = 1.0 - depth
 
@@ -263,30 +271,40 @@ class DepthAnythingRunner:
     @staticmethod
     def _normalize_depth_global(
         depth_b1hw: torch.Tensor,
-        global_depth_max: float = 750.0,
+        global_depth_max: float = 850.0,
         source_frame_index_start: int = 0,
         source_frame_stride: int = 1,
         source_fps: Optional[float] = None,
+        should_adapt_global_max: bool = False,
+        adaptive_state: Optional[dict] = None,
     ) -> torch.Tensor:
-        """Scale each frame against the global maximum, falling back to its p99."""
+        """Normalize against a hard ceiling, optionally adapting it over a render."""
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
         if source_frame_stride < 1:
             raise ValueError("source_frame_stride must be >= 1")
+        if should_adapt_global_max and adaptive_state is None:
+            raise ValueError("adaptive_state is required when adaptive global maximum is enabled")
 
         normalized = []
         for index in range(depth_b1hw.shape[0]):
             depth = depth_b1hw[index:index + 1]
+            frame_global_max = (
+                float(adaptive_state["global_depth_max"])
+                if should_adapt_global_max
+                else float(global_depth_max)
+            )
             finite_values = depth[torch.isfinite(depth)].float()
             if finite_values.numel() == 0:
-                safe_depth = torch.nan_to_num(depth, nan=0.0, posinf=global_depth_max, neginf=0.0)
-                normalized.append((safe_depth / global_depth_max).clamp(0.0, 1.0))
+                safe_depth = torch.nan_to_num(depth, nan=0.0, posinf=frame_global_max, neginf=0.0)
+                normalized.append((safe_depth / frame_global_max).clamp(0.0, 1.0))
                 continue
 
             p99 = float(torch.quantile(finite_values, 0.99).item())
-            frame_max = global_depth_max
-            if p99 > global_depth_max:
-                frame_max = p99
+            if p99 > frame_global_max:
+                over_mask = depth > frame_global_max
+                pct_over = float(over_mask.float().mean().item() * 100.0)
+                max_depth = float(torch.nan_to_num(depth, nan=float("-inf")).max().item())
                 source_frame_index = source_frame_index_start + index * source_frame_stride
                 frame_number = source_frame_index + 1
                 timestamp = (
@@ -294,31 +312,45 @@ class DepthAnythingRunner:
                     if source_fps is not None and math.isfinite(source_fps) and source_fps > 0
                     else None
                 )
-                if timestamp is None:
-                    LOGGER.warning(
-                        "Global depth normalization: source frame %d has p99 depth %.3f, "
-                        "above configured global maximum %.3f; scaling this frame to its p99.",
-                        frame_number,
-                        p99,
-                        global_depth_max,
-                    )
+                location = (
+                    f"source frame {frame_number} ({timestamp:.3f} s)"
+                    if timestamp is not None
+                    else f"source frame {frame_number}"
+                )
+                LOGGER.warning(
+                    "Global depth normalization: %s: (global_depth_max: %.3f) "
+                    "(P99: %.3f) (frame max: %.3f) (>max: %.3f%%)",
+                    location,
+                    frame_global_max,
+                    p99,
+                    max_depth,
+                    pct_over,
+                )
+
+            if should_adapt_global_max:
+                # If the P99 is over the global max, increment the over_counter and track the maximum P99 seen.
+                # However, this is a leaky counter that decays by 1 for each frame that is not over the global max.
+                # the "30" here makes the bad-to-good ratio 30:1, so that a series of good frames won't immediately reset the count.
+                if p99 > frame_global_max:
+                    adaptive_state["over_counter"] += 30
+                    adaptive_state["max_p99"] = max(adaptive_state["max_p99"], p99)
                 else:
-                    LOGGER.warning(
-                        "Global depth normalization: source frame %d (%.3f s) has p99 depth %.3f, "
-                        "above configured global maximum %.3f; scaling this frame to its p99.",
-                        frame_number,
-                        timestamp,
-                        p99,
-                        global_depth_max,
-                    )
+                    adaptive_state["over_counter"] = max(0, adaptive_state["over_counter"] - 1)
+
+                # If the P99 has been over the global max for 20 effective frames, increase the global max.
+                if adaptive_state["over_counter"] >= 20 * 30:
+                    # Only increase by 1/4th the difference so that we don't let outliers dominate and to prevent massive scaling changes.
+                    increase = math.floor((adaptive_state["max_p99"] - frame_global_max) / 4)
+                    adaptive_state["global_depth_max"] = frame_global_max + increase
+                    adaptive_state["over_counter"] = 0
 
             safe_depth = torch.nan_to_num(
                 depth,
                 nan=0.0,
-                posinf=frame_max,
+                posinf=frame_global_max,
                 neginf=0.0,
             )
-            normalized.append((safe_depth / frame_max).clamp(0.0, 1.0))
+            normalized.append((safe_depth.clamp(max=frame_global_max) / frame_global_max).clamp(0.0, 1.0))
 
         return torch.cat(normalized, dim=0)
 

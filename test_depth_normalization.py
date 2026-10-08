@@ -18,12 +18,12 @@ class GlobalDepthNormalizationTests(unittest.TestCase):
         self.assertTrue(torch.allclose(normalized_first, normalized_second))
         self.assertEqual(normalized_first.shape, first.shape)
 
-    def test_global_mode_uses_750_when_p99_is_under_limit(self):
-        depth = torch.full((1, 1, 10, 10), 350.0)
+    def test_global_mode_uses_800_when_p99_is_under_limit(self):
+        depth = torch.full((1, 1, 10, 10), 400.0)
         normalized = DepthAnythingRunner._normalize_depth_global(depth)
         self.assertTrue(torch.allclose(normalized, torch.full_like(depth, 0.5)))
 
-    def test_p99_fallback_warns_and_scales_only_that_frame(self):
+    def test_global_mode_hard_clamps_and_warns_for_p99_exceedance(self):
         ordinary = torch.full((1, 1, 10, 10), 35.0)
         exceeding = torch.arange(100, dtype=torch.float32).reshape(1, 1, 10, 10)
         depth = torch.cat([ordinary, exceeding], dim=0)
@@ -38,13 +38,16 @@ class GlobalDepthNormalizationTests(unittest.TestCase):
             )
 
         self.assertTrue(torch.allclose(normalized[0], torch.full_like(ordinary[0], 0.7)))
-        self.assertAlmostEqual(float(normalized[1, 0, 9, 8]), 1.0, places=3)
+        self.assertAlmostEqual(float(normalized[1, 0, 4, 9]), 0.98, places=5)
+        self.assertEqual(float(normalized[1, 0, 9, 8]), 1.0)
         self.assertEqual(float(normalized[1, 0, 9, 9]), 1.0)
         warning = captured.output[0]
         self.assertIn("source frame 31", warning)
         self.assertIn("1.000 s", warning)
-        self.assertIn("p99 depth 98.010", warning)
-        self.assertIn("above configured global maximum 50.000", warning)
+        self.assertIn("global_depth_max: 50.000", warning)
+        self.assertIn("P99: 98.010", warning)
+        self.assertIn("frame max: 99.000", warning)
+        self.assertIn(">max: 49.000%", warning)
 
     def test_inversion_is_applied_after_global_normalization(self):
         class FakeDepthBackend:
@@ -68,7 +71,7 @@ class GlobalDepthNormalizationTests(unittest.TestCase):
         depth = torch.tensor([[[[0.0, 750.0], [float("nan"), float("inf")]]]])
         normalized = DepthAnythingRunner._normalize_depth_global(depth)
         self.assertTrue(torch.isfinite(normalized).all())
-        self.assertEqual(float(normalized[0, 0, 0, 1]), 1.0)
+        self.assertEqual(float(normalized[0, 0, 0, 1]), 750.0 / 850.0)
         self.assertEqual(float(normalized[0, 0, 1, 1]), 1.0)
 
     def test_global_maximum_must_be_positive_and_finite(self):
@@ -92,12 +95,12 @@ class GlobalDepthNormalizationTests(unittest.TestCase):
         }
         old_job = StereoVideoJob.from_handle(base)
         self.assertEqual(old_job.depth_normalization_method, "simple")
-        self.assertEqual(old_job.global_depth_max, 750.0)
+        self.assertEqual(old_job.global_depth_max, 850.0)
 
         intermediate = dict(base, depth_normalization_method="ema", depth_temporal_ema=0.95)
         intermediate_job = StereoVideoJob.from_handle(intermediate)
         self.assertEqual(intermediate_job.depth_normalization_method, "simple")
-        self.assertEqual(intermediate_job.global_depth_max, 750.0)
+        self.assertEqual(intermediate_job.global_depth_max, 850.0)
 
         invalid_handle = dict(base, global_depth_max=float("nan"))
         with self.assertRaises(ValueError):

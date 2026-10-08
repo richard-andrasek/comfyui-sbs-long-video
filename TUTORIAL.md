@@ -53,7 +53,8 @@ The `depth_power` control changes how depth affects the shift of each pixel. Inc
 This whole process uses math.  In order to make the depth map usable, the depth values must be scaled into a 0-to-1 range before they can be used to shift pixels This repo offers two approaches to scaling this depth information:
 
 - `simple` normalizes each frame independently using that frame's minimum and maximum. It needs no tuning, but the same object can receive different apparent depth from frame to frame, which may cause the 3D strength to pulse.  Some scenes may be perfect and others may feel like the 3d rendering is strange.
-- `global` normalizes each frame based on a shared `global_depth_max`. This gives steadier depth across frames and scenes. However, the `global_depth_max` needs to suit the model's values and footage. The default is `750`. If the calculated depth exceeds the maximum, this will scale that individual frame similar to the `simple` method as a fallback. Also, this will log a warning in the console.  If watch the console and see this happen frequently, raise `global_depth_max`; if most of the scene appears too shallow, lower it. (Preview mode is helpful if you plan to fine-tune this.)
+- `global` clamps every frame against the shared `global_depth_max` (default `850`), so values above the ceiling saturate rather than changing that frame's scale. Frames whose p99 exceeds the ceiling produce a console warning.
+- `adaptive global` uses the same hard clamp, but gradually raises the ceiling if there are multiple frames exceeding that max. The increase persists for the rest of that render. Preview mode counts processed frames, so it is not intended to evaluate adaptive behavior over a full movie.
 
 ## Edge refinement
 
@@ -101,5 +102,5 @@ These settings are for the 3d rendering, so they are common across all hardware:
 * depth_power:  0.30  (0.35 if you use `fgs`.  Increase if the video feels flat. Decrease if it's strangely "too 3d")
 * invert_depth:  true
 * audio_mode:  copy
-* depth_normalization_method: global ("simple" may be ok for single-shot videos - no processing advantage either way)
-* global_depth_max: 750 (watch the console for warnings. If the video feels flat, lower this until you get a lot of warnings and then raise it to stop the warnings)
+* depth_normalization_method: global (or adaptive global if you prefer the ceiling to rise after sustained exceedances)
+* global_depth_max: 850 (the initial ceiling; watch console warnings when p99 exceeds it)

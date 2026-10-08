@@ -77,10 +77,10 @@ class StereoVideoSource:
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
                 "depth_normalization_method": (
-                    ["simple", "global"],
-                    {"default": "global", "tooltip": "Depth normalization: Depth must be normalized to fit within a boundary. GLOBAL is generally better with no performance cost.  SIMPLE uses a basic, independent per-frame min/max. This may result in some scenes with too much/little depth; GLOBAL uses a depth maximum trusting that DepthAnything is accurate, but requires manual tuning. If it goes over that max, it will scale per-frame as a fallback."},
+                    ["simple", "global", "adaptive global"],
+                    {"default": "adaptive global", "tooltip": "Depth normalization: SIMPLE uses independent per-frame min/max. GLOBAL clamps to a fixed maximum. ADAPTIVE GLOBAL also clamps, and gradually raises the maximum if the initial value is too low."},
                 ),
-                "global_depth_max": ("FLOAT", {"default": 750.0, "min": 0.01, "max": 1000000.0, "step": 10.0, "tooltip": "Global depth maximum (default: 750). Used only with global depth normalization. Watch the console for p99 warnings; if you see many, increase this value."}),
+                "global_depth_max": ("FLOAT", {"default": 850.0, "min": 0.01, "max": 1000000.0, "step": 10.0, "tooltip": "Initial depth ceiling (default: 850) for global and adaptive global normalization. Frames whose p99 exceeds the current ceiling produce a console warning."}),
                 "depth_edge_refine_method": (
                     ["none", "simple", "fgs"],
                     {
@@ -112,10 +112,10 @@ class StereoVideoSource:
         audio_mode: str,
         depth_edge_refine_method: str = "none",
         depth_normalization_method: str = "simple",
-        global_depth_max: float = 750.0,
+        global_depth_max: float = 850.0,
     ):
-        if depth_normalization_method not in ("simple", "global"):
-            raise ValueError("depth_normalization_method must be 'simple' or 'global'")
+        if depth_normalization_method not in ("simple", "global", "adaptive global"):
+            raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
         if not math.isfinite(float(global_depth_max)) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
         if source_video == "none":

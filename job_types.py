@@ -33,7 +33,7 @@ class StereoVideoJob:
     source_duration: float = 0.0
     output_depth_video: bool = False
     depth_normalization_method: str = "simple"
-    global_depth_max: float = 750.0
+    global_depth_max: float = 850.0
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -62,7 +62,9 @@ class StereoVideoJob:
         payload.setdefault("depth_normalization_method", "simple")
         if payload.get("depth_normalization_method") == "ema":
             payload["depth_normalization_method"] = "simple"
-        payload.setdefault("global_depth_max", 750.0)
+        if payload["depth_normalization_method"] not in ("simple", "global", "adaptive global"):
+            raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
+        payload.setdefault("global_depth_max", 850.0)
         global_depth_max = float(payload["global_depth_max"])
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")

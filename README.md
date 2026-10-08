@@ -128,8 +128,8 @@ Builds the video job definition.
 - `disparity_percent`: stereo separation as a percentage of image width (for example, `1.5` for 1.5%)
 - `depth_power`: depth response curve before reprojection
 - `invert_depth`: flips the inferred depth map
-- `depth_normalization_method`: `simple` keeps the current per-frame min/max normalization; `global` normalizes against a shared maximum with per-frame p99 fallback scaling
-- `global_depth_max`: depth range maximum for `global` mode (default `750`); watch the console for p99 warnings and increase this value if you see many
+- `depth_normalization_method`: `simple` uses per-frame min/max; `global` clamps depth to a fixed shared maximum; `adaptive global` uses the same hard clamp and gradually raises the maximum if the initial value is too low
+- `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `850`); frames whose p99 exceeds it produce a console warning
 - `audio_mode`: `copy` or `none`
 
 ### StereoVideoConvert
