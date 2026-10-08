@@ -73,7 +73,7 @@ class StereoVideoSource:
                 "preview_run": ("BOOLEAN", {"default": False, "tooltip": "Render a storyboard preview by processing every 30th frame."}),
                 "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM."}),
                 "disparity_percent": ("FLOAT", {"default": DEFAULTS.disparity_percent, "min": 0.0, "max": 25.0, "step": 0.05, "tooltip": "Stereo separation as a percentage of image width. This keeps the 3D strength more consistent across different resolutions."}),
-                "depth_power": ("FLOAT", {"default": 0.30, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
+                "depth_power": ("FLOAT", {"default": 0.35, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
                 "depth_normalization_method": (
