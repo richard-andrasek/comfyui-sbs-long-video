@@ -69,7 +69,10 @@ class StreamingVideoEncoder:
     def write_frames(self, frames_bhwc: np.ndarray) -> None:
         if not self.process or not self.process.stdin:
             raise RuntimeError("Encoder process not started")
-        frames_uint8 = np.clip(frames_bhwc * 255.0, 0, 255).astype(np.uint8)
+        if frames_bhwc.dtype == np.uint8:
+            frames_uint8 = np.ascontiguousarray(frames_bhwc)
+        else:
+            frames_uint8 = np.clip(frames_bhwc * 255.0, 0, 255).astype(np.uint8)
         self.process.stdin.write(frames_uint8.tobytes())
 
     def __exit__(self, exc_type, exc, tb) -> None:

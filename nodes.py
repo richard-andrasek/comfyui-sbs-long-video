@@ -54,6 +54,9 @@ def _status_text(job: StereoVideoJob) -> str:
     )
 
 
+MAX_CHUNK_PIXELS = 64_000_000
+DEBUG_SUB = 4
+
 _DEFAULT_PARTICLE_EFFECTS = {
     "particle_brightness_threshold": 0.85,
     "particle_saturation_threshold": 0.25,
@@ -157,7 +160,7 @@ class StereoVideoSource:
                 "depth_use_source_resolution": ("BOOLEAN", {"default": True, "tooltip": "Run depth inference at the video's original frame resolution instead of a manual lower resolution."}),
                 "depth_inference_resolution": ("INT", {"default": DEFAULTS.depth_inference_size, "min": 128, "max": 2048, "tooltip": "Manual longest-side resolution for depth inference when source-resolution mode is off."}),
                 "preview_run": ("BOOLEAN", {"default": False, "tooltip": "Render a storyboard preview by processing every 30th frame."}),
-                "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM."}),
+                "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM; the value may be capped by resolution."}),
                 "disparity_percent": ("FLOAT", {"default": DEFAULTS.disparity_percent, "min": 0.0, "max": 25.0, "step": 0.05, "tooltip": "Stereo separation as a percentage of image width. This keeps the 3D strength more consistent across different resolutions."}),
                 "depth_power": ("FLOAT", {"default": 0.30, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
@@ -274,6 +277,7 @@ class StereoVideoConvert:
     FUNCTION = "convert"
     CATEGORY = CATEGORY
 
+    @torch.inference_mode()
     def convert(self, video_job):
         job = StereoVideoJob.from_handle(video_job)
         spec = select_video_spec(
@@ -288,7 +292,6 @@ class StereoVideoConvert:
         temp_depth_video_path = os.path.join(temp_dir, "generated_depth.mkv") if job.output_depth_video else None
         temp_particle_debug_path = os.path.join(temp_dir, "particle_depth_debug.mp4") if job.particle_debug_video else None
 
-        runner = None
         runner = DepthAnythingRunner(
             model_name=job.depth_model,
             inference_resolution=None if job.depth_use_source_resolution else job.depth_inference_resolution,
@@ -301,7 +304,10 @@ class StereoVideoConvert:
         processed_frames = 0
         try:
             with ExitStack() as stack:
-                source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=job.chunk_size))
+                effective_chunk = max(1, min(job.chunk_size, MAX_CHUNK_PIXELS // (job.width * job.height)))
+                if effective_chunk != job.chunk_size:
+                    print(f"[StereoVideo] chunk_size capped {job.chunk_size} -> {effective_chunk} for {job.width}x{job.height}")
+                source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=effective_chunk))
                 depth_encoder = stack.enter_context(
                     StreamingDepthVideoEncoder(
                         output_path=temp_depth_video_path,
@@ -328,7 +334,9 @@ class StereoVideoConvert:
                 ) if temp_particle_debug_path else None
 
                 for source_chunk in source_decoder:
-                    frames = torch.from_numpy(source_chunk).float() / 255.0
+                    frames_u8 = torch.from_numpy(source_chunk).to(runner.device, non_blocking=True)
+                    frames = frames_u8.float().div_(255.0)
+                    del source_chunk
                     depth = runner.infer(
                         frames.permute(0, 3, 1, 2),
                         invert_depth=job.invert_depth,
@@ -336,13 +344,13 @@ class StereoVideoConvert:
                         source_frame_index_start=processed_frames * job.every_nth,
                         source_frame_stride=job.every_nth,
                         source_fps=job.source_fps,
-                    )
-                    scene_depth = depth
+                    ).to(runner.device)
+                    scene_depth = depth if job.particle_debug_video else None
 
                     particle_mask = synthetic_depth = None
                     if job.enable_particle_depth or debug_encoder is not None:
                         particle_mask = detect_particle_mask(
-                            frames,
+                            frames_u8,
                             brightness_threshold=job.particle_brightness_threshold,
                             saturation_threshold=job.particle_saturation_threshold,
                             min_area=job.particle_min_area,
@@ -359,15 +367,26 @@ class StereoVideoConvert:
                                 strength=job.particle_depth_strength,
                                 mode=job.particle_depth_mode,
                                 frame_index_start=processed_frames * job.every_nth,
+                                return_synthetic=debug_encoder is not None,
                             )
                         else:
                             synthetic_depth = depth
 
                     if debug_encoder is not None:
-                        def gray(depth_map):
-                            return depth_map.clamp(0, 1).squeeze(1).unsqueeze(-1).expand(-1, -1, -1, 3)
-                        debug_frames = torch.cat((frames, gray(scene_depth), particle_mask.squeeze(1).unsqueeze(-1).expand(-1, -1, -1, 3), gray(synthetic_depth), gray(depth)), dim=2)
-                        debug_encoder.write_frames(debug_frames.detach().cpu().numpy())
+                        def gray_u8(depth_map):
+                            gray = (depth_map.clamp(0, 1) * 255).to(torch.uint8).squeeze(1).unsqueeze(-1)
+                            return gray.expand(-1, -1, -1, 3)
+                        for start in range(0, frames.shape[0], DEBUG_SUB):
+                            end = min(start + DEBUG_SUB, frames.shape[0])
+                            panel = torch.cat((
+                                frames_u8[start:end],
+                                gray_u8(scene_depth[start:end]),
+                                gray_u8(particle_mask[start:end].float()),
+                                gray_u8(synthetic_depth[start:end]),
+                                gray_u8(depth[start:end]),
+                            ), dim=2)
+                            debug_encoder.write_frames(panel.cpu().numpy())
+                            del panel
 
                     if depth_encoder is not None:
                         depth_encoder.write_depth(depth)
@@ -378,10 +397,13 @@ class StereoVideoConvert:
                         layout=job.stereo_layout,
                         depth_power=job.depth_power,
                     )
-                    encoder.write_frames(rendered.detach().cpu().numpy())
-                    processed_frames += rendered.shape[0]
+                    rendered_u8 = (rendered.clamp(0, 1) * 255).to(torch.uint8)
+                    encoder.write_frames(rendered_u8.cpu().numpy())
+                    chunk_frame_count = rendered.shape[0]
+                    processed_frames += chunk_frame_count
                     if progress is not None:
-                        progress.update(rendered.shape[0])
+                        progress.update(chunk_frame_count)
+                    del frames, frames_u8, depth, scene_depth, particle_mask, synthetic_depth, rendered, rendered_u8
         except Exception:
             cleanup_temp_dir(temp_dir)
             raise
