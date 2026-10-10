@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import math
+import logging
 import os
 import shutil
+import time
+from datetime import datetime
 from contextlib import ExitStack
 from typing import Optional
 
@@ -38,6 +41,10 @@ except ImportError:
         resolve_output_prefix,
         select_video_spec,
     )
+
+
+LOGGER = logging.getLogger(__name__)
+ETA_LOG_INTERVAL_SECONDS = 15 * 60
 
 try:
     from comfy.utils import ProgressBar
@@ -200,6 +207,8 @@ class StereoVideoConvert:
         progress = ProgressBar(job.frame_count) if ProgressBar is not None else None
 
         processed_frames = 0
+        render_started_at = time.monotonic()
+        last_eta_log_at = render_started_at
         try:
             with ExitStack() as stack:
                 source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=job.chunk_size))
@@ -244,6 +253,26 @@ class StereoVideoConvert:
                     processed_frames += rendered.shape[0]
                     if progress is not None:
                         progress.update(rendered.shape[0])
+                    now = time.monotonic()
+                    if (
+                        processed_frames > 0
+                        and job.frame_count > 0
+                        and now - last_eta_log_at >= ETA_LOG_INTERVAL_SECONDS
+                    ):
+                        elapsed_seconds = now - render_started_at
+                        remaining_frames = max(0, job.frame_count - processed_frames)
+                        estimated_remaining_seconds = (
+                            elapsed_seconds / processed_frames * remaining_frames
+                        )
+                        percent_complete = min(100.0, processed_frames / job.frame_count * 100.0)
+                        LOGGER.info(
+                            "Current time: %s Frame %d Percent Complete %.1f%% Est. Completion: %d minutes",
+                            datetime.now().strftime("%H:%M:%S"),
+                            processed_frames,
+                            percent_complete,
+                            round(estimated_remaining_seconds / 60.0),
+                        )
+                        last_eta_log_at = now
         except Exception:
             cleanup_temp_dir(temp_dir)
             raise
