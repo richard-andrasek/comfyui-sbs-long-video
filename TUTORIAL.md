@@ -42,7 +42,7 @@ The longer the video is that you are processing, the more memory it uses in the 
 
 ## Tune the stereo effect
 
-`disparity_percent` controls the maximum pixel shift relative to the source frame width. The default is about 1.15%, which corresponds to roughly 22 pixels at 1920 pixels wide for each view's shift at the strongest depth; the two views shift in opposite directions. Higher values make the 3D effect stronger and can also make mismatched edges or eye strain more noticeable. Start with the default and adjust in small steps for your display and content. (Setting this to 0 gives a flat output.)
+`disparity_percent` controls the maximum pixel shift relative to the source frame width. The default is 0.8%, which corresponds to roughly 15 pixels at 1920 pixels wide for each view's shift at the strongest depth; the two views shift in opposite directions. Higher values make the 3D effect stronger and can also make mismatched edges or eye strain more noticeable. Start with the default and adjust in small steps for your display and content. (Setting this to 0 gives a flat output.)
 
 The `depth_power` control changes how depth affects the shift of each pixel. Increasing the value will make things "more 3d" (increasing the perceived depth). Increase it slowly if the scene looks too flat, or decrease it if the depth feels abnormal. 
 
@@ -98,8 +98,8 @@ This what I use with my RTX 5060ti (16GB vram)
 
 These settings are for the 3d rendering, so they are common across all hardware:
 
-* disparity_percent:  1.15 (this can be used if the video becomes uncomfortable to watch)
-* depth_power:  0.30  (0.35 if you use `fgs`.  Increase if the video feels flat. Decrease if it's strangely "too 3d")
+* disparity_percent:  0.8 (this can be used if the video becomes uncomfortable to watch)
+* depth_power:  0.4  (Increase if the video feels flat. Decrease if it's strangely "too 3d")
 * invert_depth:  true
 * audio_mode:  copy
 * depth_normalization_method: global (or adaptive global if you prefer the ceiling to rise after sustained exceedances)
