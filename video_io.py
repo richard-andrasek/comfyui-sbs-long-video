@@ -6,8 +6,9 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+import logging
 from fractions import Fraction
+from dataclasses import dataclass
 from typing import Iterator, Optional
 
 import numpy as np
@@ -57,6 +58,33 @@ class SelectedVideoSpec:
 
 
 VIDEO_EXTENSIONS = ("webm", "mp4", "mkv", "gif", "mov", "avi", "m4v")
+# Explicit defaults keep scene detection behavior and job-start logging reproducible.
+SCENE_DETECTOR_SETTINGS = {
+    "adaptive_threshold": 3.0,
+    "min_scene_len": 15,
+    "window_width": 2,
+    "min_content_val": 10.0,
+}
+LOGGER = logging.getLogger(__name__)
+
+
+def detect_scene_starts(path: str) -> list[int]:
+    """Return sorted, zero-based source-frame scene starts, falling back to frame 0."""
+    try:
+        from scenedetect import AdaptiveDetector, detect
+
+        scenes = detect(
+            path,
+            AdaptiveDetector(**SCENE_DETECTOR_SETTINGS),
+            show_progress=False,
+        )
+        # PySceneDetect returns scenes as (start, end) FrameTimecode pairs.
+        starts = {0}
+        starts.update(int(scene_start.frame_num) for scene_start, _scene_end in scenes)
+        return sorted(starts)
+    except Exception:
+        LOGGER.exception("PySceneDetect AdaptiveDetector failed for %s; using frame 0 only", path)
+        return [0]
 
 
 def list_input_videos() -> list[str]:

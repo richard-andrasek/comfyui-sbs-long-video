@@ -25,6 +25,8 @@ try:
         probe_video,
         resolve_output_prefix,
         select_video_spec,
+        detect_scene_starts,
+        SCENE_DETECTOR_SETTINGS,
     )
 except ImportError:
     from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
@@ -40,6 +42,8 @@ except ImportError:
         probe_video,
         resolve_output_prefix,
         select_video_spec,
+        detect_scene_starts,
+        SCENE_DETECTOR_SETTINGS,
     )
 
 
@@ -131,6 +135,16 @@ class StereoVideoSource:
         # Translate the preview toggle into the internal source-frame stride.
         every_nth = 30 if preview_run else 1
         metadata = probe_video(source_video)
+        scene_starts = detect_scene_starts(metadata.path)
+        detector_settings = ", ".join(
+            f"{name}={value:g}" for name, value in SCENE_DETECTOR_SETTINGS.items()
+        )
+        LOGGER.info(
+            "Scene detection: PySceneDetect AdaptiveDetector (%s), %d scenes; first cuts: %s",
+            detector_settings,
+            len(scene_starts),
+            ", ".join(f"{index} ({index / metadata.fps:.3f} s)" for index in scene_starts[:8]),
+        )
         spec = select_video_spec(metadata, every_nth=every_nth)
         source_duration = metadata.duration
         if source_duration <= 0 and metadata.frame_count > 0 and metadata.fps > 0:
@@ -163,6 +177,7 @@ class StereoVideoSource:
             output_depth_video=bool(output_depth_video),
             depth_normalization_method=depth_normalization_method,
             global_depth_max=global_depth_max,
+            scene_starts=scene_starts,
         )
         return (job.to_handle(), _status_text(job))
 
@@ -202,6 +217,7 @@ class StereoVideoConvert:
             inference_resolution=None if job.depth_use_source_resolution else job.depth_inference_resolution,
             depth_normalization_method=job.depth_normalization_method,
             global_depth_max=job.global_depth_max,
+            scene_starts=job.scene_starts,
         )
         renderer = GpuStereoRenderer(device=runner.device)
         progress = ProgressBar(job.frame_count) if ProgressBar is not None else None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from bisect import bisect_right
 import logging
 import math
 from typing import Optional
@@ -41,6 +42,7 @@ class DepthAnythingRunner:
         device: Optional[torch.device] = None,
         depth_normalization_method: str = "simple",
         global_depth_max: float = 850.0,
+        scene_starts: Optional[list[int]] = None,
     ) -> None:
         self.model_name = model_name
         self.inference_resolution = int(inference_resolution) if inference_resolution else None
@@ -53,6 +55,7 @@ class DepthAnythingRunner:
         self._model_id = None
         self.depth_normalization_method = depth_normalization_method
         self.global_depth_max = float(global_depth_max)
+        self.scene_starts = sorted(set(scene_starts or [0]))
         self._adaptive_global_state = {
             "over_counter": 0,
             "max_p99": 0.0,
@@ -164,6 +167,17 @@ class DepthAnythingRunner:
         else:
             depth = self._infer_model(inference_frames)
 
+        raw_depth = depth
+        scene_items = []
+        stride = max(1, int(source_frame_stride))
+        for item_index in range(depth.shape[0]):
+            idx = source_frame_index_start + item_index * stride
+            left = bisect_right(self.scene_starts, idx - stride)
+            right = bisect_right(self.scene_starts, idx)
+            matched_cuts = self.scene_starts[left:right]
+            if matched_cuts:
+                scene_items.append((item_index, idx, matched_cuts))
+
         if self.depth_normalization_method == "simple":
             # Preserve established behavior: normalize and invert at model
             # output size, then resize to the original video dimensions.
@@ -186,6 +200,15 @@ class DepthAnythingRunner:
             if invert_depth:
                 depth = 1.0 - depth
 
+        for item_index, source_index, matched_cuts in scene_items:
+            raw_stats = self._depth_stats(raw_depth[item_index])
+            timestamp = source_index / source_fps if source_fps and source_fps > 0 else 0.0
+            for _cut in matched_cuts:
+                LOGGER.info(
+                    "Scene start: source frame %d (%.3f s) raw[%s]",
+                    source_index, timestamp, raw_stats,
+                )
+
         if edge_refine_method != "none":
             if edge_refine_method == "simple":
                 depth = refine_depth_edges(
@@ -202,6 +225,20 @@ class DepthAnythingRunner:
         return depth
 
         
+
+    @staticmethod
+    def _depth_stats(depth: torch.Tensor) -> str:
+        values = depth[torch.isfinite(depth)].float().flatten()
+        if values.numel() == 0:
+            return "min=nan mean=nan p50=nan p90=nan p99=nan max=nan"
+        if values.numel() > 16_000_000:
+            values = values[::max(1, math.ceil(values.numel() / 16_000_000))]
+        quantiles = torch.quantile(values, torch.tensor([0.5, 0.9, 0.99], device=values.device))
+        return (
+            f"min={values.min().item():.4f} mean={values.mean().item():.4f} "
+            f"p50={quantiles[0].item():.4f} p90={quantiles[1].item():.4f} "
+            f"p99={quantiles[2].item():.4f} max={values.max().item():.4f}"
+        )
 
     def _prepare_inference_frames(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         if not self.inference_resolution:
