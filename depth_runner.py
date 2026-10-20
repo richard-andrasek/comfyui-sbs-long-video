@@ -31,7 +31,39 @@ HF_MODEL_CANDIDATES = {
     "da3_large": ["depth-anything/Depth-Anything-V2-Large-hf"],
 }
 
+NEAR_SCENE_P99 = 400.0  # Calibrated from logged raw p99 values in the current pipeline.
+FAR_SCENE_P99 = 450.0  # Calibrated from logged raw p99 values in the current pipeline.
+
 LOGGER = logging.getLogger(__name__)
+
+
+class AdaptiveDepthPower:
+    def __init__(self, near_power: float, far_power: float, scene_starts: list[int], stride: int = 1):
+        self.near_power = float(near_power)
+        self.far_power = float(far_power)
+        self.scene_starts = sorted(set(int(x) for x in scene_starts)) or [0]
+        self.stride = max(1, int(stride))
+        self.target = self.near_power
+        self.applied = self.near_power
+        self.first_frame_done = False
+
+    def powers(self, frame_indices: list[int], raw_p99: list[float]) -> list[float]:
+        results = []
+        for item, frame_index in enumerate(frame_indices):
+            left = bisect_right(self.scene_starts, int(frame_index) - self.stride)
+            right = bisect_right(self.scene_starts, int(frame_index))
+            is_scene_start = right > left
+            is_first = not self.first_frame_done
+            if is_scene_start or is_first:
+                value = raw_p99[item]
+                if math.isfinite(value):
+                    t = min(1.0, max(0.0, (value - NEAR_SCENE_P99) / (FAR_SCENE_P99 - NEAR_SCENE_P99)))
+                    t = t * t * (3.0 - 2.0 * t)
+                    self.target = self.near_power + t * (self.far_power - self.near_power)
+                self.applied = self.target
+            self.first_frame_done = True
+            results.append(self.applied)
+        return results
 
 
 class DepthAnythingRunner:
@@ -61,11 +93,21 @@ class DepthAnythingRunner:
             "max_p99": 0.0,
             "global_depth_max": self.global_depth_max,
         }
-
+        self.last_raw_p99: list[float] = []
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
         if not math.isfinite(self.global_depth_max) or self.global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
+
+
+    @staticmethod
+    def _raw_p99(depth: torch.Tensor) -> float:
+        values = depth[torch.isfinite(depth)].float().flatten()
+        if values.numel() == 0:
+            return float("nan")
+        if values.numel() > 1_000_000:
+            values = values[::math.ceil(values.numel() / 1_000_000)]
+        return float(torch.quantile(values, 0.99).item())
 
     def load(self) -> None:
         if self.model is not None or self._pipeline is not None or self._api_backend is not None:
@@ -154,6 +196,7 @@ class DepthAnythingRunner:
         source_frame_index_start: int = 0,
         source_frame_stride: int = 1,
         source_fps: Optional[float] = None,
+        want_raw_p99: bool = False,
     ) -> torch.Tensor:
 
         self.load()
@@ -168,15 +211,16 @@ class DepthAnythingRunner:
             depth = self._infer_model(inference_frames)
 
         raw_depth = depth
-        scene_items = []
+        raw_p99_by_item = [float("nan")] * depth.shape[0] if want_raw_p99 else []
         stride = max(1, int(source_frame_stride))
         for item_index in range(depth.shape[0]):
             idx = source_frame_index_start + item_index * stride
             left = bisect_right(self.scene_starts, idx - stride)
             right = bisect_right(self.scene_starts, idx)
-            matched_cuts = self.scene_starts[left:right]
-            if matched_cuts:
-                scene_items.append((item_index, idx, matched_cuts))
+            if right > left and want_raw_p99:
+                raw_p99_by_item[item_index] = self._raw_p99(raw_depth[item_index])
+
+        self.last_raw_p99 = raw_p99_by_item if want_raw_p99 else []
 
         if self.depth_normalization_method == "simple":
             # Preserve established behavior: normalize and invert at model
@@ -200,14 +244,6 @@ class DepthAnythingRunner:
             if invert_depth:
                 depth = 1.0 - depth
 
-        for item_index, source_index, matched_cuts in scene_items:
-            raw_stats = self._depth_stats(raw_depth[item_index])
-            timestamp = source_index / source_fps if source_fps and source_fps > 0 else 0.0
-            for _cut in matched_cuts:
-                LOGGER.info(
-                    "Scene start: source frame %d (%.3f s) raw[%s]",
-                    source_index, timestamp, raw_stats,
-                )
 
         if edge_refine_method != "none":
             if edge_refine_method == "simple":
@@ -225,20 +261,6 @@ class DepthAnythingRunner:
         return depth
 
         
-
-    @staticmethod
-    def _depth_stats(depth: torch.Tensor) -> str:
-        values = depth[torch.isfinite(depth)].float().flatten()
-        if values.numel() == 0:
-            return "min=nan mean=nan p50=nan p90=nan p99=nan max=nan"
-        if values.numel() > 16_000_000:
-            values = values[::max(1, math.ceil(values.numel() / 16_000_000))]
-        quantiles = torch.quantile(values, torch.tensor([0.5, 0.9, 0.99], device=values.device))
-        return (
-            f"min={values.min().item():.4f} mean={values.mean().item():.4f} "
-            f"p50={quantiles[0].item():.4f} p90={quantiles[1].item():.4f} "
-            f"p99={quantiles[2].item():.4f} max={values.max().item():.4f}"
-        )
 
     def _prepare_inference_frames(self, frames_bchw: torch.Tensor) -> torch.Tensor:
         if not self.inference_resolution:

@@ -14,13 +14,18 @@ class GpuStereoRenderer:
         depth_b1hw: torch.Tensor,
         disparity_percent: float,
         layout: str = "sbs",
-        depth_power: float = 1.0,
+        depth_power: float | torch.Tensor | list[float] = 1.0,
     ) -> torch.Tensor:
         frames = frames_bhwc.permute(0, 3, 1, 2).contiguous().to(self.device)
         depth = depth_b1hw.to(self.device)
         height, width = depth.shape[-2:]
         disparity_span = (float(disparity_percent) / 100.0) * float(width)
-        disparity = depth.clamp(0, 1).pow(max(depth_power, 1e-3)) * disparity_span
+        power = torch.as_tensor(depth_power, device=depth.device, dtype=depth.dtype).clamp(min=1e-3)
+        if power.ndim == 0:
+            power = power.reshape(1, 1, 1, 1)
+        else:
+            power = power.reshape(-1, 1, 1, 1)
+        disparity = depth.clamp(0, 1).pow(power) * disparity_span
 
         base_grid = self._base_grid(height, width, frames.shape[0], frames.device)
         disp_norm = disparity.squeeze(1) * (2.0 / max(width - 1, 1))

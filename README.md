@@ -126,7 +126,9 @@ Builds the video job definition.
 - `preview_run`: when enabled, processes every 30th frame for a quick preview
 - `chunk_size`: frames processed per chunk
 - `disparity_percent`: stereo separation as a percentage of image width (for example, `1.5` for 1.5%)
-- `depth_power`: depth response curve before reprojection
+- `depth_power`: depth response curve before reprojection; in adaptive mode this is the close-up scene value
+- `adaptive_depth_power`: choose a depth power at each scene change from the raw depth of that scene's first inferred frame; requires Preview mode off
+- `adaptive_depth_max`: the "depth power" for far/scenery scenes when adaptive mode is enabled (defaults to `depth_power`)
 - `invert_depth`: flips the inferred depth map
 - `depth_normalization_method`: `simple` uses per-frame min/max; `global` clamps depth to a fixed shared maximum; `adaptive global` uses the same hard clamp and gradually raises the maximum if the initial value is too low
 - `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `850`); frames whose p99 exceeds it produce a console warning

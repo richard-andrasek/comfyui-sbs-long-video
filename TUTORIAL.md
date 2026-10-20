@@ -48,6 +48,18 @@ The `depth_power` control changes how depth affects the shift of each pixel. Inc
 
 `invert_depth` reverses the depth direction. Toggle it if near objects appear behind the scene or the stereo effect otherwise looks inside-out.
 
+### Adaptive Depth Power
+
+Having too much disparity can cause eye strain, headaches and general discomfort.  Having a more shallow (more 2D) movie reduces this.  Keeping a depth power conservative, therefore, allows for a more comfortable experience.
+
+However, when a scene is particularly deep, such as an outdoor scene, or a scene with many layers, you need a heavier "depth power" to have a more 3d presence.
+
+Adaptive depth power is my attempt to reduce eye strain during close up, interior, or mid-range shots where big 3d effects are not as important while also giving a bigger presence for the high-depth scenes.
+
+With `adaptive_depth_power` enabled, the software will choose the depth power separately at every detected scene change. `depth_power` is the close-up scene value, while `adaptive_depth_max` is the far/scenery value. This allows the close up to have a depth_power of 0.5 with the big scenes to have that depth_power of 0.6, for example.
+
+This option cannot be used with `preview_run`; enabling both raises an error.
+
 ## Depth normalization
 
 This whole process uses math.  In order to make the depth map usable, the depth values must be scaled into a 0-to-1 range before they can be used to shift pixels This repo offers two approaches to scaling this depth information:
@@ -99,8 +111,9 @@ This what I use with my RTX 5060ti (16GB vram)
 These settings are for the 3d rendering, so they are common across all hardware:
 
 * disparity_percent:  0.8 (this can be used if the video becomes uncomfortable to watch)
-* depth_power:  0.4  (Increase if the video feels flat. Decrease if it's strangely "too 3d")
+* depth_power:  0.6  (Increase if the video feels flat. Decrease if it's strangely "too 3d")
 * invert_depth:  true
 * audio_mode:  copy
 * depth_normalization_method: global (or adaptive global if you prefer the ceiling to rise after sustained exceedances)
 * global_depth_max: 850 (the initial ceiling; watch console warnings when p99 exceeds it)
+* adaptive_depth_power:  These are still experimental.  We'll see how they play out.

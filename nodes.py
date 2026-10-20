@@ -13,7 +13,7 @@ import torch
 
 try:
     from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
-    from .depth_runner import DepthAnythingRunner
+    from .depth_runner import AdaptiveDepthPower, DepthAnythingRunner
     from .encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from .job_types import StereoVideoJob, StereoVideoRender
     from .stereo_renderer import GpuStereoRenderer
@@ -30,7 +30,7 @@ try:
     )
 except ImportError:
     from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
-    from depth_runner import DepthAnythingRunner
+    from depth_runner import AdaptiveDepthPower, DepthAnythingRunner
     from encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from job_types import StereoVideoJob, StereoVideoRender
     from stereo_renderer import GpuStereoRenderer
@@ -84,7 +84,7 @@ class StereoVideoSource:
                 "preview_run": ("BOOLEAN", {"default": False, "tooltip": "Render a storyboard preview by processing every 30th frame."}),
                 "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM."}),
                 "disparity_percent": ("FLOAT", {"default": DEFAULTS.disparity_percent, "min": 0.0, "max": 25.0, "step": 0.05, "tooltip": "Stereo separation as a percentage of image width. This keeps the 3D strength more consistent across different resolutions."}),
-                "depth_power": ("FLOAT", {"default": DEFAULTS.depth_power, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation."}),
+                "depth_power": ("FLOAT", {"default": DEFAULTS.depth_power, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation; adaptive mode uses this for close-up scenes."}),
                 "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
                 "depth_normalization_method": (
@@ -99,6 +99,8 @@ class StereoVideoSource:
                         "tooltip": "Depth refinement method: none disables refinement, simple uses local RGB edge-aware smoothing, and fgs uses Fast Global Smoother based refinement.",
                     },
                 ),
+                "adaptive_depth_power": ("BOOLEAN", {"default": False, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
+                "adaptive_depth_max": ("FLOAT", {"default": DEFAULTS.depth_power, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
             },
         }
 
@@ -124,11 +126,17 @@ class StereoVideoSource:
         depth_edge_refine_method: str = "none",
         depth_normalization_method: str = "simple",
         global_depth_max: float = 850.0,
+        adaptive_depth_power: bool = False,
+        adaptive_depth_max: float = DEFAULTS.depth_power,
     ):
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
         if not math.isfinite(float(global_depth_max)) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
+        if adaptive_depth_power and preview_run:
+            raise ValueError("adaptive_depth_power cannot be used with Preview mode (preview_run); disable Preview mode and run again.")
+        if adaptive_depth_power and (not math.isfinite(float(adaptive_depth_max)) or adaptive_depth_max <= 0):
+            raise ValueError("adaptive_depth_max must be finite and greater than zero when adaptive_depth_power is enabled")
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
@@ -178,6 +186,8 @@ class StereoVideoSource:
             depth_normalization_method=depth_normalization_method,
             global_depth_max=global_depth_max,
             scene_starts=scene_starts,
+            adaptive_depth_power=adaptive_depth_power,
+            adaptive_depth_max=adaptive_depth_max,
         )
         return (job.to_handle(), _status_text(job))
 
@@ -200,6 +210,8 @@ class StereoVideoConvert:
 
     def convert(self, video_job):
         job = StereoVideoJob.from_handle(video_job)
+        if job.adaptive_depth_power and job.every_nth != 1:
+            raise ValueError("adaptive_depth_power requires Preview mode to be disabled")
         spec = select_video_spec(
             probe_video(job.source_video_path),
             every_nth=job.every_nth,
@@ -219,6 +231,7 @@ class StereoVideoConvert:
             global_depth_max=job.global_depth_max,
             scene_starts=job.scene_starts,
         )
+        adaptive = None
         renderer = GpuStereoRenderer(device=runner.device)
         progress = ProgressBar(job.frame_count) if ProgressBar is not None else None
 
@@ -226,6 +239,14 @@ class StereoVideoConvert:
         render_started_at = time.monotonic()
         last_eta_log_at = render_started_at
         try:
+            runner.load()
+            if job.adaptive_depth_power:
+                adaptive = AdaptiveDepthPower(
+                    near_power=job.depth_power,
+                    far_power=job.adaptive_depth_max,
+                    scene_starts=job.scene_starts,
+                    stride=job.every_nth,
+                )
             with ExitStack() as stack:
                 source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=job.chunk_size))
                 depth_encoder = stack.enter_context(
@@ -254,7 +275,12 @@ class StereoVideoConvert:
                         source_frame_index_start=processed_frames * job.every_nth,
                         source_frame_stride=job.every_nth,
                         source_fps=job.source_fps,
+                        want_raw_p99=adaptive is not None,
                     )
+                    depth_power = job.depth_power
+                    if adaptive is not None:
+                        frame_indices = [processed_frames * job.every_nth + i * job.every_nth for i in range(depth.shape[0])]
+                        depth_power = adaptive.powers(frame_indices, runner.last_raw_p99)
 
                     if depth_encoder is not None:
                         depth_encoder.write_depth(depth)
@@ -263,7 +289,7 @@ class StereoVideoConvert:
                         depth_b1hw=depth,
                         disparity_percent=job.disparity_percent,
                         layout=job.stereo_layout,
-                        depth_power=job.depth_power,
+                        depth_power=depth_power,
                     )
                     encoder.write_frames(rendered.detach().cpu().numpy())
                     processed_frames += rendered.shape[0]
