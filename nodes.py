@@ -101,6 +101,12 @@ class StereoVideoSource:
                 ),
                 "adaptive_depth_power": ("BOOLEAN", {"default": True, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
                 "adaptive_depth_max": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
+                "zero_parallax": ("FLOAT", {
+                    "default": DEFAULTS.zero_parallax, "min": 0.0, "max": 1.0, "step": 0.01,
+                    "tooltip": "Shifts the whole scene toward the viewer, as a fraction of "
+                               "the depth range. 0 = unchanged, 0.25 = nearest 25% of the "
+                               "range in front of the screen, 1 = entire range in front. "
+                               "Does not change depth strength or depth_power."}),
             },
         }
 
@@ -128,6 +134,7 @@ class StereoVideoSource:
         global_depth_max: float = 850.0,
         adaptive_depth_power: bool = True,
         adaptive_depth_max: float = 0.6,
+        zero_parallax: float = 0.0,
     ):
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
@@ -137,6 +144,8 @@ class StereoVideoSource:
             raise ValueError("adaptive_depth_power cannot be used with Preview mode (preview_run); disable Preview mode and run again.")
         if adaptive_depth_power and (not math.isfinite(float(adaptive_depth_max)) or adaptive_depth_max <= 0):
             raise ValueError("adaptive_depth_max must be finite and greater than zero when adaptive_depth_power is enabled")
+        if not math.isfinite(float(zero_parallax)) or not 0.0 <= zero_parallax <= 1.0:
+            raise ValueError("zero_parallax must be between 0.0 and 1.0")
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
@@ -188,6 +197,7 @@ class StereoVideoSource:
             scene_starts=scene_starts,
             adaptive_depth_power=adaptive_depth_power,
             adaptive_depth_max=adaptive_depth_max,
+            zero_parallax=zero_parallax,
         )
         return (job.to_handle(), _status_text(job))
 
@@ -290,6 +300,7 @@ class StereoVideoConvert:
                         disparity_percent=job.disparity_percent,
                         layout=job.stereo_layout,
                         depth_power=depth_power,
+                        zero_parallax=job.zero_parallax,
                     )
                     encoder.write_frames(rendered.detach().cpu().numpy())
                     processed_frames += rendered.shape[0]

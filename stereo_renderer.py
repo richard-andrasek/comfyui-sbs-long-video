@@ -15,6 +15,7 @@ class GpuStereoRenderer:
         disparity_percent: float,
         layout: str = "sbs",
         depth_power: float | torch.Tensor | list[float] = 1.0,
+        zero_parallax: float = 0.0,
     ) -> torch.Tensor:
         frames = frames_bhwc.permute(0, 3, 1, 2).contiguous().to(self.device)
         depth = depth_b1hw.to(self.device)
@@ -25,7 +26,8 @@ class GpuStereoRenderer:
             power = power.reshape(1, 1, 1, 1)
         else:
             power = power.reshape(-1, 1, 1, 1)
-        disparity = depth.clamp(0, 1).pow(power) * disparity_span
+        # Positive disparity sits behind the screen; subtracting zero_parallax moves the scene forward.
+        disparity = (depth.clamp(0, 1).pow(power) - float(zero_parallax)) * disparity_span
 
         base_grid = self._base_grid(height, width, frames.shape[0], frames.device)
         disp_norm = disparity.squeeze(1) * (2.0 / max(width - 1, 1))

@@ -12,6 +12,7 @@ class PluginDefaults:
     depth_inference_size: int = 512
     disparity_percent: float = 0.8
     depth_power: float = 0.5
+    zero_parallax: float = 0.0
     output_codec: str = "libx264"
     output_crf: int = 19
     output_preset: str = "medium"

@@ -1,87 +1,110 @@
-text
-```
+OVERVIEW
 
-OVERVIEW:
+Add a zero_parallax control to the ComfyUI SBS Long Video project.
 
-Add a zero-parallax offset control to the ComfyUI SBS Long Video project.
+zero_parallax is a float from 0.0 to 1.0, applied to the normalized depth
+(0-1, after the depth_power curve) before disparity is computed. It is a
+fraction of the depth range, not a percentage and not a pixel value.
 
-The purpose is to independently control where the generated 3D scene sits relative to the screen plane, without changing the depth map or the overall depth strength.
+  0.00 -> current behavior, unchanged
+  0.25 -> scene shifts forward by 25% of the depth range
+           (the nearest 25% ends up in front of the screen)
+  1.00 -> the entire depth range is in front of the screen
 
-The new setting, zero_parallax_ratio, will apply a constant horizontal disparity offset to the generated left-eye and right-eye images. The offset will move the scene farther behind the screen or closer to/in front of the screen, depending on its sign.
+Formula (stereo_renderer.py):
+  disparity = (depth.clamp(0, 1).pow(depth_power) - zero_parallax) * disparity_span
 
-The existing disparity_ratio and depth_power settings will continue to work as they do now.
+disparity_percent and depth_power keep working as they do now. The depth map,
+the depth_power curve and the total depth spread are not modified; only the
+position of that spread relative to the screen plane moves. Negative disparity
+is already handled by the existing left(+disp) / right(-disp) grid logic, so
+the shift is automatically equal and opposite for the two eyes.
 
-A value of zero must preserve the current rendering behavior. Existing workflows and saved jobs must remain compatible.
+Resolution independence is automatic: disparity_span is already
+disparity_percent/100 * single-eye width.
 
-The offset will be expressed as a fraction of the individual eye-image width, making it resolution-independent.
+Sign convention (derived from the grid math, verify on a test clip):
+positive disparity = behind screen, negative = in front. Depth 0 currently
+sits on the screen plane, so subtracting zero_parallax moves the scene forward.
 
-FILE CHANGES:
+FILE CHANGES
 
 1. config.py
+   In PluginDefaults add:
+       zero_parallax: float = 0.0
 
-Add a zero_parallax_ratio configuration default with a value of 0.0.
+2. nodes.py  (StereoVideoSource)
+   a. In INPUT_TYPES["required"], add as the LAST entry (after
+      depth_edge_refine_method). Position matters: ComfyUI stores widget
+      values by position, so inserting it earlier would corrupt saved workflows.
+          "zero_parallax": ("FLOAT", {
+              "default": DEFAULTS.zero_parallax, "min": 0.0, "max": 1.0, "step": 0.01,
+              "tooltip": "Shifts the whole scene toward the viewer, as a fraction of "
+                         "the depth range. 0 = unchanged, 0.25 = nearest 25% of the "
+                         "range in front of the screen, 1 = entire range in front. "
+                         "Does not change depth strength or depth_power."}),
+   b. build_job(): add parameter `zero_parallax: float = 0.0` as the LAST
+      parameter, and validate like global_depth_max:
+          if not math.isfinite(float(zero_parallax)) or not 0.0 <= zero_parallax <= 1.0:
+              raise ValueError("zero_parallax must be between 0.0 and 1.0")
+   c. Pass `zero_parallax=zero_parallax` into the StereoVideoJob(...) call.
+   d. StereoVideoConvert.convert(): add `zero_parallax=job.zero_parallax` to the
+      renderer.render(...) call.
 
-This ensures that existing configurations retain their current behavior unless the user explicitly changes the new setting.
+3. job_types.py  (StereoVideoJob)
+   a. Add the field with the other defaulted fields (after global_depth_max):
+          zero_parallax: float = 0.0
+   b. In from_handle(), next to the other setdefault calls:
+          payload.setdefault("zero_parallax", 0.0)
+          payload["zero_parallax"] = float(payload["zero_parallax"])
+      Old saved jobs load with 0.0; new jobs round-trip through asdict() as-is.
 
-2. nodes.py
+4. stereo_renderer.py  (GpuStereoRenderer.render)
+   a. Add `zero_parallax: float = 0.0` as the last parameter (keeps existing
+      callers working).
+   b. Replace the disparity line with:
+          disparity = (
+              depth.clamp(0, 1).pow(max(depth_power, 1e-3)) - float(zero_parallax)
+          ) * disparity_span
+   c. Leave everything else untouched: grid construction, grid_sample, _oob_mask,
+      _fill_holes and the output layout.
+   At zero_parallax == 0.0 the result is bit-identical to the current output.
 
-Add a zero_parallax_ratio floating-point input to the Stereo Video Source node.
+5. README.md
+   Add to the StereoVideoSource reference:
+   - `zero_parallax`: moves the scene toward the viewer as a fraction of the
+     depth range (0.0-1.0); 0 leaves rendering unchanged.
 
-Provide a default of 0.0, a reasonable adjustment range, an appropriate step size, and a tooltip explaining the effect of the setting.
+VALIDATION - HUMAN only--no agent to perform this.
 
-Pass the value through the node's execution path into the job configuration and renderer.
+1. Restart ComfyUI; confirm Stereo Video Source shows zero_parallax as the last
+   widget, and that an existing saved workflow loads with the other widgets
+   still holding their old values and zero_parallax = 0.0.
+2. Render a short clip at 0.0 and confirm it matches current output (identical
+   frames, or a zero-diff against a pre-change render).
+3. Render the same clip at 0.25, 0.5 and 1.0. Confirm the scene moves toward
+   the viewer. At 1.0 the whole scene should be in front of the screen. If
+   the direction is reversed, flip the sign in the renderer line.
+4. Run the disparity-analysis script on each output. Expected: the disparity
+   distribution moves by zero_parallax * disparity_span pixels (span =
+   disparity_percent/100 * single-eye width) while its spread (e.g. p99 - p1)
+   stays unchanged.
+5. Confirm the shift is relative to the single-eye width, not the SBS width.
+6. Inspect foreground and background objects: relative separation is the same
+   as at 0.0; only the position relative to the screen changes.
+7. Check borders and disocclusions. Maximum |shift| is never larger than the
+   current disparity_span (the range moves from [0, span] to [-zp*span,
+   (1-zp)*span]), so exposed-edge width should be no worse than today, and
+   around zero_parallax 0.5 it is roughly halved. The existing 3x3 hole
+   fill (4 iterations) is unchanged; wide edge gaps with large
+   disparity_percent were already a limitation.
+8. Load an older saved job handle (no zero_parallax key) and confirm it defaults
+   to 0.0 and renders as before.
+9. Tune zero_parallax on short clips (preview_run) independently of
+   disparity_percent and depth_power before processing a full movie.
 
-Ensure that the new input does not interfere with existing node inputs or saved workflows.
+EXPECTED RESULT
 
-3. job_types.py
-
-Add zero_parallax_ratio to the job data structure.
-
-Provide a default value of 0.0 when loading older saved job data that does not contain the new field.
-
-Ensure that job serialization and deserialization continue to work with both old and new job configurations.
-
-4. stereo_renderer.py
-
-Add zero_parallax_ratio as an optional renderer parameter, defaulting to 0.0.
-
-Calculate the zero-parallax offset in pixels by multiplying the ratio by the width of an individual eye image.
-
-Apply this offset to the existing depth-dependent disparity before generating the left-eye and right-eye sampling coordinates.
-
-The left and right images must receive equal and opposite shifts so that the change produces the intended stereo separation.
-
-A zero offset must leave the existing disparity calculation and pixel-warping behavior unchanged.
-
-Preserve the existing sampling, occlusion handling, hole filling, and output layout.
-
-The offset must change the placement of the scene relative to the screen plane without modifying the depth map or the depth_power response curve.
-
-VALIDATION:
-
-1. Restart ComfyUI and verify that the Stereo Video Source node exposes the new zero_parallax_ratio input.
-
-2. Generate a short test clip with zero_parallax_ratio set to 0.0. Confirm that the result matches the existing rendering behavior.
-
-3. Generate the same clip with a small positive offset, such as 0.0005, and then 0.0010.
-
-4. Generate another clip with a small negative offset to verify that the effect reverses direction.
-
-5. Analyze the resulting SBS images with the disparity-analysis script. Confirm that changing the offset moves the disparity distribution in the expected direction while leaving its overall spread approximately unchanged.
-
-6. Verify that the zero-parallax offset is scaled according to the individual eye-image width, not the full side-by-side output width.
-
-7. Inspect foreground and background objects to confirm that the perceived depth placement changes as expected.
-
-8. Check for newly exposed image borders, disocclusion artifacts, and hole-filling problems caused by the additional shifts.
-
-9. Test an existing workflow and an older saved job to ensure that omitting the new setting defaults to zero and does not break backward compatibility.
-
-10. Once the behavior is verified, use short clips to tune zero_parallax_ratio independently from disparity_ratio and depth_power before processing a full movie.
-
-EXPECTED RESULT:
-
-The user can independently adjust the generated scene's placement relative to the screen plane while retaining control over the total depth strength and depth distribution.
-
-The default setting preserves existing behavior, and older workflows remain compatible.
-```
+The scene can be moved in front of the screen without changing depth strength
+or the depth curve. The default of 0.0 preserves existing behavior, and
+older workflows and saved jobs load unchanged.

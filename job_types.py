@@ -34,6 +34,7 @@ class StereoVideoJob:
     output_depth_video: bool = False
     depth_normalization_method: str = "simple"
     global_depth_max: float = 850.0
+    zero_parallax: float = 0.0
     scene_starts: list[int] = field(default_factory=lambda: [0])
     adaptive_depth_power: bool = True
     adaptive_depth_max: float = 0.6
@@ -71,6 +72,8 @@ class StereoVideoJob:
         payload.setdefault("scene_starts", [0])
         payload.setdefault("adaptive_depth_power", True)
         payload.setdefault("adaptive_depth_max", 0.6)
+        payload.setdefault("zero_parallax", 0.0)
+        payload["zero_parallax"] = float(payload["zero_parallax"])
         global_depth_max = float(payload["global_depth_max"])
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
