@@ -38,6 +38,7 @@ class StereoVideoJob:
     scene_starts: list[int] = field(default_factory=lambda: [0])
     adaptive_depth_power: bool = True
     adaptive_depth_max: float = 0.6
+    adaptive_zero_parallax: bool = False
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -73,6 +74,7 @@ class StereoVideoJob:
         payload.setdefault("adaptive_depth_power", True)
         payload.setdefault("adaptive_depth_max", 0.6)
         payload.setdefault("zero_parallax", 0.0)
+        payload.setdefault("adaptive_zero_parallax", False)
         payload["zero_parallax"] = float(payload["zero_parallax"])
         global_depth_max = float(payload["global_depth_max"])
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
