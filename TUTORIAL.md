@@ -111,9 +111,9 @@ This what I use with my RTX 5060ti (16GB vram)
 These settings are for the 3d rendering, so they are common across all hardware:
 
 * disparity_percent:  0.8 (this can be used if the video becomes uncomfortable to watch)
-* depth_power:  0.6  (Increase if the video feels flat. Decrease if it's strangely "too 3d")
+* depth_power:  0.5  (Increase if the video feels flat. Decrease if it's strangely "too 3d")
 * invert_depth:  true
 * audio_mode:  copy
 * depth_normalization_method: global (or adaptive global if you prefer the ceiling to rise after sustained exceedances)
 * global_depth_max: 850 (the initial ceiling; watch console warnings when p99 exceeds it)
-* adaptive_depth_power:  These are still experimental.  We'll see how they play out.
+* adaptive_depth_power:  true (uses depth_power 0.5 for close-up scenes and adaptive_depth_max 0.6 for deep scenery; requires Preview mode off)

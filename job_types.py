@@ -35,8 +35,8 @@ class StereoVideoJob:
     depth_normalization_method: str = "simple"
     global_depth_max: float = 850.0
     scene_starts: list[int] = field(default_factory=lambda: [0])
-    adaptive_depth_power: bool = False
-    adaptive_depth_max: float = 0.0
+    adaptive_depth_power: bool = True
+    adaptive_depth_max: float = 0.6
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -69,8 +69,8 @@ class StereoVideoJob:
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
         payload.setdefault("global_depth_max", 850.0)
         payload.setdefault("scene_starts", [0])
-        payload.setdefault("adaptive_depth_power", False)
-        payload.setdefault("adaptive_depth_max", 0.0)
+        payload.setdefault("adaptive_depth_power", True)
+        payload.setdefault("adaptive_depth_max", 0.6)
         global_depth_max = float(payload["global_depth_max"])
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")

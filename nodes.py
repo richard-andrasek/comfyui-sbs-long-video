@@ -99,8 +99,8 @@ class StereoVideoSource:
                         "tooltip": "Depth refinement method: none disables refinement, simple uses local RGB edge-aware smoothing, and fgs uses Fast Global Smoother based refinement.",
                     },
                 ),
-                "adaptive_depth_power": ("BOOLEAN", {"default": False, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
-                "adaptive_depth_max": ("FLOAT", {"default": DEFAULTS.depth_power, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
+                "adaptive_depth_power": ("BOOLEAN", {"default": True, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
+                "adaptive_depth_max": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
             },
         }
 
@@ -126,8 +126,8 @@ class StereoVideoSource:
         depth_edge_refine_method: str = "none",
         depth_normalization_method: str = "simple",
         global_depth_max: float = 850.0,
-        adaptive_depth_power: bool = False,
-        adaptive_depth_max: float = DEFAULTS.depth_power,
+        adaptive_depth_power: bool = True,
+        adaptive_depth_max: float = 0.6,
     ):
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
