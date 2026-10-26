@@ -129,6 +129,8 @@ Builds the video job definition.
 - `depth_power`: depth response curve before reprojection (default `0.5`); in adaptive mode this is the close-up scene value
 - `adaptive_depth_power`: choose a depth power at each scene change from the raw depth of that scene's first inferred frame (enabled by default); requires Preview mode off
 - `adaptive_depth_max`: the "depth power" for far/scenery scenes when adaptive mode is enabled (default `0.6`)
+- `zero_parallax`: moves the scene toward the viewer as a fraction of the depth range (`0.0`-`1.0`, default `0.0`); `0` leaves rendering unchanged, `1` puts the entire range in front of the screen. Does not change depth strength or `depth_power`
+- `adaptive_zero_parallax`: at each scene change, shifts the scene so the nearest 1% (p1) of its depth sits on the screen plane, using that scene's `depth_power` so the shift does not change the depth; `zero_parallax` is added on top (sum clamped to `0`-`1`). Disabled by default; requires Preview mode off
 - `invert_depth`: flips the inferred depth map
 - `depth_normalization_method`: `simple` uses per-frame min/max; `global` clamps depth to a fixed shared maximum; `adaptive global` uses the same hard clamp and gradually raises the maximum if the initial value is too low
 - `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `850`); frames whose p99 exceeds it produce a console warning
