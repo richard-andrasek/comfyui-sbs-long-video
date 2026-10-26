@@ -18,12 +18,19 @@ not hard requirements.  The pipeline with its basic settings works quite well, b
 
 ## THINGS THAT DIDN'T WORK
 
-### EMA / "Flicker reduction"
+### Temporal disparity stabilization / EMA / "Flicker reduction"
 
-It's nice in theory and had a practical effect of actually reducing flicker in the generated depth map.  
-However, in the long run, the global depth map was far, far more successfull
+The DepthAnythingV3 depth analysis has a very small per-frame shutter at the p25 statistic (and probably others).  
+However, this shutter is ranging around a raw-value of 4-5. (P25 value of 44-49, for example).  Once depth-normalized,
+this results in a sub-pixel (max 1.0 pixel) disparity shutter.  This happens per-frame.
 
-### Global Depth Normalization across the screen
+That sounds bad, but in reality, this is a very minor shutter and does not drift over time. At this level, this is just noise.
+
+Conversely, when I tried to stabilize depth temporaly, what happened is that thigns that should have changed did not change
+the way that they should have.  For example, zooming in or out had problems, people walking onto a scene had problems, etc.
+Ultimately, this disparity stabilization caused more problems than it solved.
+
+### Zero-parallax mid-screen
 
 So, in theory, 3d movies should be able to pop out at you.  But in practice, this process didn't work
 so well with the model (Depth Anything V3 on global depth normalization) that I am using. As such, I scrapped that
@@ -48,39 +55,11 @@ given that this is a frame-to-frame rendering.  As such, this process is more li
 
 The Fast Global Smoothing does a good job. I'm not convinced that this will be a better option.
 
-
 ### Softmax splatting / depth-aware forward warp
 
 This is an alternative to Z-buffer DIBR.  However, it could cause artifacts and isn't as good as the other. So, skip it.
 
 ## Potential Improvements
-
-### Temporal disparity stabilization
-
-DepthAnything V3 with Adaptive Global Normalization is pretty solid and has solved almost all of the depth pumping issues.
-
-Through testing, I've seen that there is minor depth pumping.
-
-Example: p25 shows [64, 69, 72, 69, 72, 76, 68, 67, 21, 74, 66, 65] across 24 frames--1 second.
-
-Keep in mind that this is on a scale of 0-750, resulting in an imperceptibly small shifts (roughly 1 pixel over time) 
-in pixel disparity due to the depth pumping.
-
-I believe this may be contributing to fatigue/vr sickness over time.  To improve this, we'll need **scene-aware**, 
-EMA-based stabilization of temporal disparity.  
-
-A previous attempt at EMA-based depth normalization was a dramatic failure due to the fact that it was not scene aware
-and existed on simple normalization, rather than global normalization. With the new globally-scaled normalization techniques,
-it may be worth re-visiting this concept.
-
-**Step 2**
-
-I need to re-test longer videos with the current best-in-class generation available and see if there is VR fatigue at the
-30 minute mark.
-
-This *may* be related to depth pumping within a scene. However, it's just as likely (if not more) to be related to depth
-changes between scenes.  These inter-scene changes are far more dramatic (p25 going from ~70 to ~140) and are more likely
-to cause the issue.
 
 ### Z-buffer DIBR
 
