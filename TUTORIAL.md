@@ -60,6 +60,14 @@ With `adaptive_depth_power` enabled, the software will choose the depth power se
 
 This option cannot be used with `preview_run`; enabling both raises an error.
 
+## Adaptive zero parallax
+
+With `adaptive_zero_parallax` enabled, the software measures the nearest 1% (p1) of the depth on the first frame of every detected scene and shifts that scene so this depth sits on the screen plane. The p1 value is run through that scene's `depth_power` (after adaptive depth power has chosen it), so the whole scene moves without changing its depth. `zero_parallax` is added on top as an extra forward nudge (the total is capped at 1.0). The value is set once per scene and does not change until the next scene change.
+
+With `simple` depth normalization p1 is usually close to 0, so the effect is strongest with `global` or `adaptive global`.
+
+This option cannot be used with `preview_run`; enabling both raises an error.
+
 ## Depth normalization
 
 This whole process uses math.  In order to make the depth map usable, the depth values must be scaled into a 0-to-1 range before they can be used to shift pixels This repo offers two approaches to scaling this depth information:

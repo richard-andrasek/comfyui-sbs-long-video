@@ -13,7 +13,7 @@ import torch
 
 try:
     from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
-    from .depth_runner import AdaptiveDepthPower, DepthAnythingRunner
+    from .depth_runner import AdaptiveDepthPower, AdaptiveZeroParallax, DepthAnythingRunner
     from .encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from .job_types import StereoVideoJob, StereoVideoRender
     from .stereo_renderer import GpuStereoRenderer
@@ -30,7 +30,7 @@ try:
     )
 except ImportError:
     from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
-    from depth_runner import AdaptiveDepthPower, DepthAnythingRunner
+    from depth_runner import AdaptiveDepthPower, AdaptiveZeroParallax, DepthAnythingRunner
     from encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from job_types import StereoVideoJob, StereoVideoRender
     from stereo_renderer import GpuStereoRenderer
@@ -101,6 +101,17 @@ class StereoVideoSource:
                 ),
                 "adaptive_depth_power": ("BOOLEAN", {"default": True, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
                 "adaptive_depth_max": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
+                "zero_parallax": ("FLOAT", {
+                    "default": DEFAULTS.zero_parallax, "min": 0.0, "max": 1.0, "step": 0.01,
+                    "tooltip": "Shifts the whole scene toward the viewer, as a fraction of "
+                               "the depth range. 0 = unchanged, 0.25 = nearest 25% of the "
+                               "range in front of the screen, 1 = entire range in front. "
+                               "Does not change depth strength or depth_power."}),
+                "adaptive_zero_parallax": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "At each scene change, place the nearest 1% (p1) of that scene's depth on "
+                               "the screen plane, then add zero_parallax. Shifts the scene without changing "
+                               "its depth. Requires Preview mode off."}),
             },
         }
 
@@ -128,6 +139,8 @@ class StereoVideoSource:
         global_depth_max: float = 850.0,
         adaptive_depth_power: bool = True,
         adaptive_depth_max: float = 0.6,
+        zero_parallax: float = 0.0,
+        adaptive_zero_parallax: bool = False,
     ):
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
@@ -135,8 +148,12 @@ class StereoVideoSource:
             raise ValueError("global_depth_max must be finite and greater than zero")
         if adaptive_depth_power and preview_run:
             raise ValueError("adaptive_depth_power cannot be used with Preview mode (preview_run); disable Preview mode and run again.")
+        if adaptive_zero_parallax and preview_run:
+            raise ValueError("adaptive_zero_parallax cannot be used with Preview mode (preview_run); disable Preview mode and run again.")
         if adaptive_depth_power and (not math.isfinite(float(adaptive_depth_max)) or adaptive_depth_max <= 0):
             raise ValueError("adaptive_depth_max must be finite and greater than zero when adaptive_depth_power is enabled")
+        if not math.isfinite(float(zero_parallax)) or not 0.0 <= zero_parallax <= 1.0:
+            raise ValueError("zero_parallax must be between 0.0 and 1.0")
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
@@ -188,6 +205,8 @@ class StereoVideoSource:
             scene_starts=scene_starts,
             adaptive_depth_power=adaptive_depth_power,
             adaptive_depth_max=adaptive_depth_max,
+            zero_parallax=zero_parallax,
+            adaptive_zero_parallax=adaptive_zero_parallax,
         )
         return (job.to_handle(), _status_text(job))
 
@@ -212,6 +231,8 @@ class StereoVideoConvert:
         job = StereoVideoJob.from_handle(video_job)
         if job.adaptive_depth_power and job.every_nth != 1:
             raise ValueError("adaptive_depth_power requires Preview mode to be disabled")
+        if job.adaptive_zero_parallax and job.every_nth != 1:
+            raise ValueError("adaptive_zero_parallax requires Preview mode to be disabled")
         spec = select_video_spec(
             probe_video(job.source_video_path),
             every_nth=job.every_nth,
@@ -232,6 +253,7 @@ class StereoVideoConvert:
             scene_starts=job.scene_starts,
         )
         adaptive = None
+        adaptive_zp = None
         renderer = GpuStereoRenderer(device=runner.device)
         progress = ProgressBar(job.frame_count) if ProgressBar is not None else None
 
@@ -244,6 +266,12 @@ class StereoVideoConvert:
                 adaptive = AdaptiveDepthPower(
                     near_power=job.depth_power,
                     far_power=job.adaptive_depth_max,
+                    scene_starts=job.scene_starts,
+                    stride=job.every_nth,
+                )
+            if job.adaptive_zero_parallax:
+                adaptive_zp = AdaptiveZeroParallax(
+                    base_shift=job.zero_parallax,
                     scene_starts=job.scene_starts,
                     stride=job.every_nth,
                 )
@@ -277,10 +305,15 @@ class StereoVideoConvert:
                         source_fps=job.source_fps,
                         want_raw_p99=adaptive is not None,
                     )
+                    frame_indices = [processed_frames * job.every_nth + i * job.every_nth for i in range(depth.shape[0])]
                     depth_power = job.depth_power
                     if adaptive is not None:
-                        frame_indices = [processed_frames * job.every_nth + i * job.every_nth for i in range(depth.shape[0])]
                         depth_power = adaptive.powers(frame_indices, runner.last_raw_p99)
+
+                    zero_parallax = job.zero_parallax
+                    if adaptive_zp is not None:
+                        # Must come after depth_power: the scene's p1 is raised to its final power.
+                        zero_parallax = adaptive_zp.shifts(frame_indices, depth, depth_power)
 
                     if depth_encoder is not None:
                         depth_encoder.write_depth(depth)
@@ -290,6 +323,7 @@ class StereoVideoConvert:
                         disparity_percent=job.disparity_percent,
                         layout=job.stereo_layout,
                         depth_power=depth_power,
+                        zero_parallax=zero_parallax,
                     )
                     encoder.write_frames(rendered.detach().cpu().numpy())
                     processed_frames += rendered.shape[0]
