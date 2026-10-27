@@ -13,7 +13,8 @@ import torch
 
 try:
     from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
-    from .depth_runner import AdaptiveDepthPower, AdaptiveZeroParallax, DepthAnythingRunner
+    from .depth_runner import AdaptiveDepthPower, DepthAnythingRunner
+    from .z_plane import AdaptiveZeroParallax
     from .encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from .job_types import StereoVideoJob, StereoVideoRender
     from .stereo_renderer import GpuStereoRenderer
@@ -30,7 +31,8 @@ try:
     )
 except ImportError:
     from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
-    from depth_runner import AdaptiveDepthPower, AdaptiveZeroParallax, DepthAnythingRunner
+    from depth_runner import AdaptiveDepthPower, DepthAnythingRunner
+    from z_plane import AdaptiveZeroParallax
     from encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
     from job_types import StereoVideoJob, StereoVideoRender
     from stereo_renderer import GpuStereoRenderer
