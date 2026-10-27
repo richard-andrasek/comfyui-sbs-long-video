@@ -12,11 +12,11 @@ from typing import Optional
 import torch
 
 try:
-    from .config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
+    from .config import CATEGORY, DEFAULTS, FACE_DETECTOR_TYPE, JOB_TYPE, RENDER_TYPE
     from .depth_runner import AdaptiveDepthPower, DepthAnythingRunner
-    from .z_plane import AdaptiveZeroParallax
+    from .z_plane import AdaptiveZeroParallax, SubjectFaceDetector
     from .encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
-    from .job_types import StereoVideoJob, StereoVideoRender
+    from .job_types import ZERO_PARALLAX_MODES, StereoVideoJob, StereoVideoRender
     from .stereo_renderer import GpuStereoRenderer
     from .video_io import (
         FFmpegChunkDecoder,
@@ -30,11 +30,11 @@ try:
         SCENE_DETECTOR_SETTINGS,
     )
 except ImportError:
-    from config import CATEGORY, DEFAULTS, JOB_TYPE, RENDER_TYPE
+    from config import CATEGORY, DEFAULTS, FACE_DETECTOR_TYPE, JOB_TYPE, RENDER_TYPE
     from depth_runner import AdaptiveDepthPower, DepthAnythingRunner
-    from z_plane import AdaptiveZeroParallax
+    from z_plane import AdaptiveZeroParallax, SubjectFaceDetector
     from encoder import StreamingDepthVideoEncoder, StreamingVideoEncoder, finalize_mux
-    from job_types import StereoVideoJob, StereoVideoRender
+    from job_types import ZERO_PARALLAX_MODES, StereoVideoJob, StereoVideoRender
     from stereo_renderer import GpuStereoRenderer
     from video_io import (
         FFmpegChunkDecoder,
@@ -51,6 +51,21 @@ except ImportError:
 
 LOGGER = logging.getLogger(__name__)
 ETA_LOG_INTERVAL_SECONDS = 15 * 60
+FACE_DETECTION_FOLDER = "face_detection"
+FACE_DETECTOR_HELP = (
+    "Download face_detection_yunet_2023mar.onnx (MIT license) from the opencv/opencv_zoo repository "
+    "(models/face_detection_yunet) and place it in ComfyUI/models/face_detection/."
+)
+
+try:
+    import folder_paths
+
+    # ComfyUI/models/face_detection/, listing .onnx files only (extra_model_paths.yaml can add more).
+    folder_paths.folder_names_and_paths.setdefault(
+        FACE_DETECTION_FOLDER, ([os.path.join(folder_paths.models_dir, FACE_DETECTION_FOLDER)], {".onnx"})
+    )
+except ImportError:
+    folder_paths = None
 
 try:
     from comfy.utils import ProgressBar
@@ -66,7 +81,11 @@ def _status_text(job: StereoVideoJob) -> str:
 
 
 class StereoVideoSource:
-    DESCRIPTION = "Builds a long-video stereo conversion job using automatic Depth Anything depth estimation, with optional depth refinement."
+    DESCRIPTION = (
+        "Builds a long-video stereo conversion job using automatic Depth Anything depth estimation, with optional depth refinement. "
+        "zero_parallax chooses where the screen plane sits: a fixed constant_zero_parallax, adaptive (nearest 1% of each scene "
+        "on the screen), or subject (each scene's main face just behind the screen; needs a Face Detector Loader on StereoVideoConvert)."
+    )
     OUTPUT_TOOLTIPS = [
         "Internal job handle for StereoVideoConvert.",
         "Human-readable summary of the selected source clip and render settings.",
@@ -103,17 +122,21 @@ class StereoVideoSource:
                 ),
                 "adaptive_depth_power": ("BOOLEAN", {"default": True, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
                 "adaptive_depth_max": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
-                "zero_parallax": ("FLOAT", {
-                    "default": DEFAULTS.zero_parallax, "min": 0.0, "max": 1.0, "step": 0.01,
-                    "tooltip": "Shifts the whole scene toward the viewer, as a fraction of "
+                "constant_zero_parallax": ("FLOAT", {
+                    "default": DEFAULTS.constant_zero_parallax, "min": 0.0, "max": 1.0, "step": 0.01,
+                    "tooltip": "Used only when zero_parallax is 'constant'; ignored by 'adaptive' and 'subject'. "
+                               "Shifts the whole video toward the viewer, as a fraction of "
                                "the depth range. 0 = unchanged, 0.25 = nearest 25% of the "
                                "range in front of the screen, 1 = entire range in front. "
                                "Does not change depth strength or depth_power."}),
-                "adaptive_zero_parallax": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "At each scene change, place the nearest 1% (p1) of that scene's depth on "
-                               "the screen plane, then add zero_parallax. Shifts the scene without changing "
-                               "its depth. Requires Preview mode off."}),
+                "zero_parallax": (list(ZERO_PARALLAX_MODES), {
+                    "default": "constant",
+                    "tooltip": "Where the screen plane sits. constant (default): a fixed shift of constant_zero_parallax "
+                               "for the whole video. adaptive: at each scene change, the nearest 1% (p1) of that scene's "
+                               "depth is placed on the screen plane. subject: at each scene change, the most confident face "
+                               "is placed just behind the screen (falls back to adaptive when no face is found); needs a "
+                               "Face Detector Loader connected to StereoVideoConvert. adaptive and subject shift the scene "
+                               "without changing its depth, ignore constant_zero_parallax, and require Preview mode off."}),
             },
         }
 
@@ -141,8 +164,8 @@ class StereoVideoSource:
         global_depth_max: float = 850.0,
         adaptive_depth_power: bool = True,
         adaptive_depth_max: float = 0.6,
-        zero_parallax: float = 0.0,
-        adaptive_zero_parallax: bool = False,
+        constant_zero_parallax: float = DEFAULTS.constant_zero_parallax,
+        zero_parallax: str = "constant",
     ):
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
@@ -150,12 +173,12 @@ class StereoVideoSource:
             raise ValueError("global_depth_max must be finite and greater than zero")
         if adaptive_depth_power and preview_run:
             raise ValueError("adaptive_depth_power cannot be used with Preview mode (preview_run); disable Preview mode and run again.")
-        if adaptive_zero_parallax and preview_run:
-            raise ValueError("adaptive_zero_parallax cannot be used with Preview mode (preview_run); disable Preview mode and run again.")
+        if zero_parallax != "constant" and preview_run:
+            raise ValueError(f"zero_parallax '{zero_parallax}' cannot be used with Preview mode (preview_run); disable Preview mode or set zero_parallax to 'constant' and run again.")
         if adaptive_depth_power and (not math.isfinite(float(adaptive_depth_max)) or adaptive_depth_max <= 0):
             raise ValueError("adaptive_depth_max must be finite and greater than zero when adaptive_depth_power is enabled")
-        if not math.isfinite(float(zero_parallax)) or not 0.0 <= zero_parallax <= 1.0:
-            raise ValueError("zero_parallax must be between 0.0 and 1.0")
+        if not math.isfinite(float(constant_zero_parallax)) or not 0.0 <= constant_zero_parallax <= 1.0:
+            raise ValueError("constant_zero_parallax must be between 0.0 and 1.0")
         if source_video == "none":
             raise ValueError("No input video found. Place a video in ComfyUI's input directory and select it here.")
 
@@ -207,14 +230,17 @@ class StereoVideoSource:
             scene_starts=scene_starts,
             adaptive_depth_power=adaptive_depth_power,
             adaptive_depth_max=adaptive_depth_max,
+            constant_zero_parallax=constant_zero_parallax,
             zero_parallax=zero_parallax,
-            adaptive_zero_parallax=adaptive_zero_parallax,
         )
         return (job.to_handle(), _status_text(job))
 
 
 class StereoVideoConvert:
-    DESCRIPTION = "Runs decode, depth estimation, stereo reprojection, and streaming encode into a temporary video."
+    DESCRIPTION = (
+        "Runs decode, depth estimation, stereo reprojection, and streaming encode into a temporary video. "
+        "The optional face_detector input (from Face Detector Loader) is required when zero_parallax is 'subject' and ignored otherwise."
+    )
     OUTPUT_TOOLTIPS = [
         "Internal rendered-video handle for StereoVideoMuxOutput.",
         "Human-readable status text describing the temporary render output.",
@@ -222,19 +248,30 @@ class StereoVideoConvert:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"video_job": (JOB_TYPE, {"tooltip": "Job handle produced by StereoVideoSource."})}}
+        return {
+            "required": {"video_job": (JOB_TYPE, {"tooltip": "Job handle produced by StereoVideoSource."})},
+            "optional": {
+                "face_detector": (FACE_DETECTOR_TYPE, {
+                    "tooltip": "Face detector from Face Detector Loader. Required when zero_parallax is 'subject'; ignored otherwise."}),
+            },
+        }
 
     RETURN_TYPES = (RENDER_TYPE, "STRING")
     RETURN_NAMES = ("rendered_video", "summary")
     FUNCTION = "convert"
     CATEGORY = CATEGORY
 
-    def convert(self, video_job):
+    def convert(self, video_job, face_detector=None):
         job = StereoVideoJob.from_handle(video_job)
+        if job.zero_parallax == "subject" and face_detector is None:
+            raise ValueError(
+                "zero_parallax is 'subject' but no face detector is connected. Connect a Face Detector Loader "
+                "node to StereoVideoConvert's face_detector input."
+            )
         if job.adaptive_depth_power and job.every_nth != 1:
             raise ValueError("adaptive_depth_power requires Preview mode to be disabled")
-        if job.adaptive_zero_parallax and job.every_nth != 1:
-            raise ValueError("adaptive_zero_parallax requires Preview mode to be disabled")
+        if job.zero_parallax != "constant" and job.every_nth != 1:
+            raise ValueError(f"zero_parallax '{job.zero_parallax}' requires Preview mode to be disabled")
         spec = select_video_spec(
             probe_video(job.source_video_path),
             every_nth=job.every_nth,
@@ -271,11 +308,12 @@ class StereoVideoConvert:
                     scene_starts=job.scene_starts,
                     stride=job.every_nth,
                 )
-            if job.adaptive_zero_parallax:
+            if job.zero_parallax != "constant":
                 adaptive_zp = AdaptiveZeroParallax(
-                    base_shift=job.zero_parallax,
                     scene_starts=job.scene_starts,
                     stride=job.every_nth,
+                    face_detector=face_detector if job.zero_parallax == "subject" else None,
+                    fps=job.source_fps,
                 )
             with ExitStack() as stack:
                 source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=job.chunk_size))
@@ -312,10 +350,10 @@ class StereoVideoConvert:
                     if adaptive is not None:
                         depth_power = adaptive.powers(frame_indices, runner.last_raw_p99)
 
-                    zero_parallax = job.zero_parallax
+                    zero_parallax = job.constant_zero_parallax
                     if adaptive_zp is not None:
-                        # Must come after depth_power: the scene's p1 is raised to its final power.
-                        zero_parallax = adaptive_zp.shifts(frame_indices, depth, depth_power)
+                        # Must come after depth_power: the scene's p1 / face depth is raised to its final power.
+                        zero_parallax = adaptive_zp.shifts(frame_indices, depth, depth_power, source_chunk)
 
                     if depth_encoder is not None:
                         depth_encoder.write_depth(depth)
@@ -372,6 +410,41 @@ class StereoVideoConvert:
         return (render.to_handle(), f"Rendered {processed_frames} frames to temp video")
 
 
+class SBS_FaceDetectorLoader:
+    DESCRIPTION = (
+        "Loads a YuNet face detector for StereoVideoConvert's face_detector input, used by zero_parallax = 'subject'. "
+        + FACE_DETECTOR_HELP + " Runs on the CPU; needs opencv-python 4.8 or newer."
+    )
+    OUTPUT_TOOLTIPS = ["Face detector for StereoVideoConvert's face_detector input."]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        models = folder_paths.get_filename_list(FACE_DETECTION_FOLDER) if folder_paths is not None else []
+        return {
+            "required": {
+                "model_name": (models if models else ["none"], {
+                    "tooltip": "YuNet .onnx model in ComfyUI/models/face_detection/ (face_detection_yunet_2023mar.onnx)."}),
+            }
+        }
+
+    RETURN_TYPES = (FACE_DETECTOR_TYPE,)
+    RETURN_NAMES = ("face_detector",)
+    FUNCTION = "load"
+    CATEGORY = CATEGORY
+
+    def load(self, model_name):
+        path = None
+        if folder_paths is not None and model_name != "none":
+            path = folder_paths.get_full_path(FACE_DETECTION_FOLDER, model_name)
+        if not path:
+            raise ValueError(f"Face detector model '{model_name}' not found. {FACE_DETECTOR_HELP}")
+        try:
+            return (SubjectFaceDetector(path),)
+        except Exception as error:
+            raise RuntimeError(
+                f"Could not load face detector '{model_name}' ({error}). YuNet needs opencv-python 4.8 or newer."
+            ) from error
+
 
 class StereoVideoMuxOutput:
     DESCRIPTION = "Finalizes the rendered temp video, optionally muxes audio, and saves the output with an auto-incremented filename."
@@ -419,10 +492,12 @@ NODE_CLASS_MAPPINGS = {
     "StereoVideoSource": StereoVideoSource,
     "StereoVideoConvert": StereoVideoConvert,
     "StereoVideoMuxOutput": StereoVideoMuxOutput,
+    "SBS_FaceDetectorLoader": SBS_FaceDetectorLoader,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "StereoVideoSource": "Stereo Video Source",
     "StereoVideoConvert": "Stereo Video Convert",
     "StereoVideoMuxOutput": "Stereo Video Mux Output",
+    "SBS_FaceDetectorLoader": "Face Detector Loader",
 }

@@ -60,13 +60,19 @@ With `adaptive_depth_power` enabled, the software will choose the depth power se
 
 This option cannot be used with `preview_run`; enabling both raises an error.
 
-## Adaptive zero parallax
+## Zero parallax: constant, adaptive and subject
 
-With `adaptive_zero_parallax` enabled, the software measures the nearest 1% (p1) of the depth on the first frame of every detected scene and shifts that scene so this depth sits on the screen plane. The p1 value is run through that scene's `depth_power` (after adaptive depth power has chosen it), so the whole scene moves without changing its depth. `zero_parallax` is added on top as an extra forward nudge (the total is capped at 1.0). The value is set once per scene and does not change until the next scene change.
+The `zero_parallax` dropdown decides where the screen plane sits. The three modes are exclusive.
 
-With `simple` depth normalization p1 is usually close to 0, so the effect is strongest with `global` or `adaptive global`.
+- `constant` (default): the whole video is shifted toward the viewer by `constant_zero_parallax`. `0` leaves the image unchanged.
+- `adaptive`: the software measures the nearest 1% (p1) of the depth on the first frame of every detected scene and shifts that scene so this depth sits on the screen plane. The p1 value is run through that scene's `depth_power` (after adaptive depth power has chosen it), so the whole scene moves without changing its depth. `constant_zero_parallax` is ignored. The value is set once per scene and does not change until the next scene change.
+- `subject`: like `adaptive`, but the software looks for faces on the first frame of every scene and shifts the scene so the most confident face sits just behind the screen (0.1 of the depth range). Your eyes then stay at the same depth on the actor across cuts, the way stereographers "pull convergence" in films. Anything nearer than the face comes out of the screen, but never more than a small step (p1 at most 0.15 in front). If no face is found, the scene is handled exactly like `adaptive`. This mode needs a `Face Detector Loader` node connected to `StereoVideoConvert`'s `face_detector` input (see the README for the model download).
 
-This option cannot be used with `preview_run`; enabling both raises an error.
+When to use which: `adaptive` keeps the nearest object on the screen, which suits scenery, action and shots without people. `subject` is meant for dialogue-heavy material, where the nearest 1% is often a shoulder or a table edge and the actor would otherwise land at a different depth in every shot. The console logs one line per scene showing what was chosen, which helps when tuning.
+
+Both `adaptive` and `subject` work best with `global` or `adaptive global` depth normalization; with `simple`, p1 is usually close to 0, so the effect is small.
+
+`adaptive` and `subject` cannot be used with `preview_run`; selecting either with preview raises an error.
 
 ## Depth normalization
 

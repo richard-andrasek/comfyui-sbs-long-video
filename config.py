@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 JOB_TYPE = "STEREO_VIDEO_JOB"
 RENDER_TYPE = "STEREO_VIDEO_RENDER"
+FACE_DETECTOR_TYPE = "SBS_FACE_DETECTOR"
 CATEGORY = "Stereo Video"
 
 
@@ -12,7 +13,7 @@ class PluginDefaults:
     depth_inference_size: int = 512
     disparity_percent: float = 0.8
     depth_power: float = 0.5
-    zero_parallax: float = 0.0
+    constant_zero_parallax: float = 0.0
     output_codec: str = "libx264"
     output_crf: int = 19
     output_preset: str = "medium"

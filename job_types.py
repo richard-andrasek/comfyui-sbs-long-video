@@ -10,6 +10,9 @@ except ImportError:
     from config import JOB_TYPE, RENDER_TYPE
 
 
+ZERO_PARALLAX_MODES = ("constant", "adaptive", "subject")
+
+
 @dataclass
 class StereoVideoJob:
     source_video_path: str
@@ -34,11 +37,11 @@ class StereoVideoJob:
     output_depth_video: bool = False
     depth_normalization_method: str = "simple"
     global_depth_max: float = 850.0
-    zero_parallax: float = 0.0
+    constant_zero_parallax: float = 0.0
     scene_starts: list[int] = field(default_factory=lambda: [0])
     adaptive_depth_power: bool = True
     adaptive_depth_max: float = 0.6
-    adaptive_zero_parallax: bool = False
+    zero_parallax: str = "constant"
 
     def to_handle(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -73,9 +76,11 @@ class StereoVideoJob:
         payload.setdefault("scene_starts", [0])
         payload.setdefault("adaptive_depth_power", True)
         payload.setdefault("adaptive_depth_max", 0.6)
-        payload.setdefault("zero_parallax", 0.0)
-        payload.setdefault("adaptive_zero_parallax", False)
-        payload["zero_parallax"] = float(payload["zero_parallax"])
+        payload.setdefault("constant_zero_parallax", 0.0)
+        payload.setdefault("zero_parallax", "constant")
+        payload["constant_zero_parallax"] = float(payload["constant_zero_parallax"])
+        if payload["zero_parallax"] not in ZERO_PARALLAX_MODES:
+            raise ValueError("zero_parallax must be 'constant', 'adaptive', or 'subject'")
         global_depth_max = float(payload["global_depth_max"])
         if not math.isfinite(global_depth_max) or global_depth_max <= 0:
             raise ValueError("global_depth_max must be finite and greater than zero")
