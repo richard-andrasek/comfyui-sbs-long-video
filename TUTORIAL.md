@@ -60,20 +60,26 @@ With `adaptive_depth_power` enabled, the software will choose the depth power se
 
 This option cannot be used with `preview_run`; enabling both raises an error.
 
-## Adaptive zero parallax
+## Zero parallax: constant, adaptive and subject
 
-With `adaptive_zero_parallax` enabled, the software measures the nearest 1% (p1) of the depth on the first frame of every detected scene and shifts that scene so this depth sits on the screen plane. The p1 value is run through that scene's `depth_power` (after adaptive depth power has chosen it), so the whole scene moves without changing its depth. `zero_parallax` is added on top as an extra forward nudge (the total is capped at 1.0). The value is set once per scene and does not change until the next scene change.
+The `zero_parallax` dropdown decides where the screen plane sits. The three modes are exclusive.
 
-With `simple` depth normalization p1 is usually close to 0, so the effect is strongest with `global` or `adaptive global`.
+- `constant` (default): the whole video is shifted toward the viewer by `constant_zero_parallax`. `0` leaves the image unchanged.
+- `adaptive`: the software measures the nearest 1% (p1) of the depth on the first frame of every detected scene and shifts that scene so this depth sits on the screen plane. The p1 value is run through that scene's `depth_power` (after adaptive depth power has chosen it), so the whole scene moves without changing its depth. `constant_zero_parallax` is ignored. The value is set once per scene and does not change until the next scene change.
+- `subject`: like `adaptive`, but the software looks for faces on the first frame of every scene and shifts the scene so the most confident face sits just behind the screen (0.1 of the depth range). Your eyes then stay at the same depth on the actor across cuts, the way stereographers "pull convergence" in films. Anything nearer than the face comes out of the screen, but never more than a small step (p1 at most 0.15 in front). If no face is found, the scene is handled exactly like `adaptive`. This mode needs a `Face Detector Loader` node connected to `StereoVideoConvert`'s `face_detector` input (see the README for the model download).
 
-This option cannot be used with `preview_run`; enabling both raises an error.
+When to use which: `adaptive` keeps the nearest object on the screen, which suits scenery, action and shots without people. `subject` is meant for dialogue-heavy material, where the nearest 1% is often a shoulder or a table edge and the actor would otherwise land at a different depth in every shot. The console logs one line per scene showing what was chosen, which helps when tuning.
+
+Both `adaptive` and `subject` work best with `global` or `adaptive global` depth normalization; with `simple`, p1 is usually close to 0, so the effect is small.
+
+`adaptive` and `subject` cannot be used with `preview_run`; selecting either with preview raises an error.
 
 ## Depth normalization
 
 This whole process uses math.  In order to make the depth map usable, the depth values must be scaled into a 0-to-1 range before they can be used to shift pixels This repo offers two approaches to scaling this depth information:
 
 - `simple` normalizes each frame independently using that frame's minimum and maximum. It needs no tuning, but the same object can receive different apparent depth from frame to frame, which may cause the 3D strength to pulse.  Some scenes may be perfect and others may feel like the 3d rendering is strange.
-- `global` clamps every frame against the shared `global_depth_max` (default `850`), so values above the ceiling saturate rather than changing that frame's scale. Frames whose p99 exceeds the ceiling produce a console warning.
+- `global` clamps every frame against the shared `global_depth_max` (default `900`), so values above the ceiling saturate rather than changing that frame's scale. Frames whose p99 exceeds the ceiling produce a console warning.
 - `adaptive global` uses the same hard clamp, but gradually raises the ceiling if there are multiple frames exceeding that max. The increase persists for the rest of that render. Preview mode counts processed frames, so it is not intended to evaluate adaptive behavior over a full movie.
 
 ## Edge refinement
@@ -123,5 +129,5 @@ These settings are for the 3d rendering, so they are common across all hardware:
 * invert_depth:  true
 * audio_mode:  copy
 * depth_normalization_method: global (or adaptive global if you prefer the ceiling to rise after sustained exceedances)
-* global_depth_max: 850 (the initial ceiling; watch console warnings when p99 exceeds it)
+* global_depth_max: 900 (the initial ceiling; watch console warnings when p99 exceeds it)
 * adaptive_depth_power:  true (uses depth_power 0.5 for close-up scenes and adaptive_depth_max 0.6 for deep scenery; requires Preview mode off)

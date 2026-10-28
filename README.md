@@ -56,15 +56,22 @@ python -m pip install git+https://github.com/ByteDance-Seed/Depth-Anything-3.git
 
 - otherwise the plugin falls back to `transformers`-compatible checkpoints
 
+Optional face detector (only needed for `zero_parallax = subject`):
+
+- download `face_detection_yunet_2023mar.onnx` (YuNet, ~230 KB, MIT license) from the [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) repository
+- place it in `ComfyUI/models/face_detection/` (create the folder if needed)
+- it runs on the CPU through OpenCV (`opencv-python` 4.8 or newer, listed in `requirements.txt`)
+
 After installing dependencies, restart ComfyUI.
 
 ## Nodes
 
-Since this processing is different than any other ComfyUI plugin, this repo currently ships three custom nodes:
+Since this processing is different than any other ComfyUI plugin, this repo currently ships four custom nodes:
 
 - `StereoVideoSource`
 - `StereoVideoConvert`
 - `StereoVideoMuxOutput`
+- `SBS_FaceDetectorLoader` ("Face Detector Loader", optional; only for `zero_parallax = subject`)
 
 Due to the batching nature, these are incompatable with other ComfyUI nodes (such as the Video Helper Suite)
 
@@ -129,11 +136,16 @@ Builds the video job definition.
 - `depth_power`: depth response curve before reprojection (default `0.5`); in adaptive mode this is the close-up scene value
 - `adaptive_depth_power`: choose a depth power at each scene change from the raw depth of that scene's first inferred frame (enabled by default); requires Preview mode off
 - `adaptive_depth_max`: the "depth power" for far/scenery scenes when adaptive mode is enabled (default `0.6`)
-- `zero_parallax`: moves the scene toward the viewer as a fraction of the depth range (`0.0`-`1.0`, default `0.0`); `0` leaves rendering unchanged, `1` puts the entire range in front of the screen. Does not change depth strength or `depth_power`
-- `adaptive_zero_parallax`: at each scene change, shifts the scene so the nearest 1% (p1) of its depth sits on the screen plane, using that scene's `depth_power` so the shift does not change the depth; `zero_parallax` is added on top (sum clamped to `0`-`1`). Disabled by default; requires Preview mode off
+- `constant_zero_parallax`: used only when `zero_parallax` is `constant`. Moves the whole video toward the viewer as a fraction of the depth range (`0.0`-`1.0`, default `0.0`); `0` leaves rendering unchanged, `1` puts the entire range in front of the screen. Does not change depth strength or `depth_power`
+- `zero_parallax`: where the screen plane sits (default `constant`). The three modes are exclusive; `adaptive` and `subject` ignore `constant_zero_parallax` and require Preview mode off
+  - `constant`: a fixed shift of `constant_zero_parallax` for the whole video
+  - `adaptive`: at each scene change, shifts the scene so the nearest 1% (p1) of its depth sits on the screen plane, using that scene's `depth_power` so the shift does not change the depth
+  - `subject`: at each scene change, finds faces in the scene's first frame and shifts the scene so the most confident face sits just behind the screen. Anything nearer than the face comes out of the screen, limited so p1 is at most a small step in front. Falls back to `adaptive` when no face is found. Needs a `Face Detector Loader` connected to `StereoVideoConvert`
+
+> **Workflows saved before this change:** the float `zero_parallax` was renamed to `constant_zero_parallax`, and the `adaptive_zero_parallax` toggle was replaced by the `zero_parallax` dropdown. Re-set both widgets on `StereoVideoSource` in older workflows.
 - `invert_depth`: flips the inferred depth map
 - `depth_normalization_method`: `simple` uses per-frame min/max; `global` clamps depth to a fixed shared maximum; `adaptive global` uses the same hard clamp and gradually raises the maximum if the initial value is too low
-- `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `850`); frames whose p99 exceeds it produce a console warning
+- `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `900`); frames whose p99 exceeds it produce a console warning
 - `audio_mode`: `copy` or `none`
 
 ### StereoVideoConvert
@@ -141,8 +153,16 @@ Builds the video job definition.
 Executes the job.
 
 - `video_job`: internal handle from `StereoVideoSource`
+- `face_detector` (optional): from `Face Detector Loader`. Required when `zero_parallax` is `subject` (the node fails immediately without it); ignored otherwise
 - returns a rendered temp-video handle for the output node
 - when generated-depth export is enabled, streams each inferred depth chunk to a temporary FFV1 file alongside the stereo render
+
+### Face Detector Loader (`SBS_FaceDetectorLoader`)
+
+Loads the YuNet face detector used by `zero_parallax = subject`.
+
+- `model_name`: an `.onnx` file from `ComfyUI/models/face_detection/` (see Installation)
+- returns `face_detector` for `StereoVideoConvert`; fails with a clear error if the folder is empty or OpenCV cannot load the model
 
 ### StereoVideoMuxOutput
 
