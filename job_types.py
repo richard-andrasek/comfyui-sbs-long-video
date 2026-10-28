@@ -36,7 +36,7 @@ class StereoVideoJob:
     source_duration: float = 0.0
     output_depth_video: bool = False
     depth_normalization_method: str = "simple"
-    global_depth_max: float = 850.0
+    global_depth_max: float = 900.0
     constant_zero_parallax: float = 0.0
     scene_starts: list[int] = field(default_factory=lambda: [0])
     adaptive_depth_power: bool = True
@@ -72,7 +72,7 @@ class StereoVideoJob:
             payload["depth_normalization_method"] = "simple"
         if payload["depth_normalization_method"] not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")
-        payload.setdefault("global_depth_max", 850.0)
+        payload.setdefault("global_depth_max", 900.0)
         payload.setdefault("scene_starts", [0])
         payload.setdefault("adaptive_depth_power", True)
         payload.setdefault("adaptive_depth_max", 0.6)

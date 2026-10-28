@@ -84,7 +84,7 @@ class DepthAnythingRunner:
         inference_resolution: Optional[int] = 518,
         device: Optional[torch.device] = None,
         depth_normalization_method: str = "simple",
-        global_depth_max: float = 850.0,
+        global_depth_max: float = 900.0,
         scene_starts: Optional[list[int]] = None,
     ) -> None:
         self.model_name = model_name
@@ -330,7 +330,7 @@ class DepthAnythingRunner:
     @staticmethod
     def _normalize_depth_global(
         depth_b1hw: torch.Tensor,
-        global_depth_max: float = 850.0,
+        global_depth_max: float = 900.0,
         source_frame_index_start: int = 0,
         source_frame_stride: int = 1,
         source_fps: Optional[float] = None,

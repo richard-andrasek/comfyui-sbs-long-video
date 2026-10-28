@@ -84,7 +84,8 @@ class StereoVideoSource:
     DESCRIPTION = (
         "Builds a long-video stereo conversion job using automatic Depth Anything depth estimation, with optional depth refinement. "
         "zero_parallax chooses where the screen plane sits: a fixed constant_zero_parallax, adaptive (nearest 1% of each scene "
-        "on the screen), or subject (each scene's main face just behind the screen; needs a Face Detector Loader on StereoVideoConvert)."
+        "on the screen, default), or subject (each scene's main face just behind the screen; needs a Face Detector Loader on StereoVideoConvert). "
+        "subject is best for sitcoms and romance that focus heavily on individuals, and is not great for sci-fi, action, or nature shows."
     )
     OUTPUT_TOOLTIPS = [
         "Internal job handle for StereoVideoConvert.",
@@ -98,21 +99,23 @@ class StereoVideoSource:
             "required": {
                 "source_video": (input_videos if input_videos else ["none"], {"tooltip": "Main input clip to convert into stereo."}),
                 "stereo_layout": (["sbs", "top_bottom"], {"default": "sbs", "tooltip": "Stereo arrangement for the output video."}),
+                "preview_run": ("BOOLEAN", {"default": False, "tooltip": "Render a storyboard preview by processing every 30th frame."}),
                 "output_depth_video": ("BOOLEAN", {"default": False, "tooltip": "Save the generated depth as a lossless grayscale video. Allowed for clips under 60 seconds or when preview_run is enabled."}),
                 "depth_model": (["da3_small", "da3_base", "da3_large"], {"default": "da3_small", "tooltip": "Depth model size used for automatic depth estimation."}),
+                "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
                 "depth_use_source_resolution": ("BOOLEAN", {"default": True, "tooltip": "Run depth inference at the video's original frame resolution instead of a manual lower resolution."}),
                 "depth_inference_resolution": ("INT", {"default": DEFAULTS.depth_inference_size, "min": 128, "max": 2048, "tooltip": "Manual longest-side resolution for depth inference when source-resolution mode is off."}),
-                "preview_run": ("BOOLEAN", {"default": False, "tooltip": "Render a storyboard preview by processing every 30th frame."}),
                 "chunk_size": ("INT", {"default": DEFAULTS.chunk_size, "min": 1, "max": 64, "tooltip": "Frames processed per batch. Higher values improve throughput but use more RAM and VRAM."}),
                 "disparity_percent": ("FLOAT", {"default": DEFAULTS.disparity_percent, "min": 0.0, "max": 25.0, "step": 0.05, "tooltip": "Stereo separation as a percentage of image width. This keeps the 3D strength more consistent across different resolutions."}),
                 "depth_power": ("FLOAT", {"default": DEFAULTS.depth_power, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth response curve. Higher values exaggerate near/far separation; adaptive mode uses this for close-up scenes."}),
-                "invert_depth": ("BOOLEAN", {"default": True, "tooltip": "Flip the inferred depth map if the scene appears inside-out."}),
+                "adaptive_depth_power": ("BOOLEAN", {"default": True, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
+                "adaptive_depth_max": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
                 "audio_mode": (["copy", "none"], {"default": "copy", "tooltip": "Copy source audio into the final muxed video, or output video only."}),
                 "depth_normalization_method": (
                     ["simple", "global", "adaptive global"],
                     {"default": "adaptive global", "tooltip": "Depth normalization: SIMPLE uses independent per-frame min/max. GLOBAL clamps to a fixed maximum. ADAPTIVE GLOBAL also clamps, and gradually raises the maximum if the initial value is too low."},
                 ),
-                "global_depth_max": ("FLOAT", {"default": 850.0, "min": 0.01, "max": 1000000.0, "step": 10.0, "tooltip": "Initial depth ceiling (default: 850) for global and adaptive global normalization. Frames whose p99 exceeds the current ceiling produce a console warning."}),
+                "global_depth_max": ("FLOAT", {"default": 900.0, "min": 0.01, "max": 1000000.0, "step": 10.0, "tooltip": "Initial depth ceiling (default: 900) for global and adaptive global normalization. Frames whose p99 exceeds the current ceiling produce a console warning."}),
                 "depth_edge_refine_method": (
                     ["none", "simple", "fgs"],
                     {
@@ -120,8 +123,15 @@ class StereoVideoSource:
                         "tooltip": "Depth refinement method: none disables refinement, simple uses local RGB edge-aware smoothing, and fgs uses Fast Global Smoother based refinement.",
                     },
                 ),
-                "adaptive_depth_power": ("BOOLEAN", {"default": True, "tooltip": "Choose depth_power at each scene change from that scene's first frame. Requires Preview mode off."}),
-                "adaptive_depth_max": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "Depth power for deep or scenery scenes when adaptive depth power is enabled."}),
+                "zero_parallax": (list(ZERO_PARALLAX_MODES), {
+                    "default": "adaptive",
+                    "tooltip": "Where the screen plane sits. constant: a fixed shift of constant_zero_parallax "
+                               "for the whole video. ADAPTIVE (default): at each scene change, the nearest 1% (p1) of that scene's "
+                               "depth is placed on the screen plane. SUBJECT: at each scene change, the most confident face "
+                               "is placed just behind the screen (falls back to ADAPTIVE when no face is found); needs a "
+                               "Face Detector Loader connected to StereoVideoConvert. SUBJECT suits sitcoms and romance "
+                               "that focus heavily on individuals; it is not great for action, or nature shows. ADAPTIVE and SUBJECT shift the scene "
+                               "without changing its depth, ignore constant_zero_parallax, and require Preview mode off."}),
                 "constant_zero_parallax": ("FLOAT", {
                     "default": DEFAULTS.constant_zero_parallax, "min": 0.0, "max": 1.0, "step": 0.01,
                     "tooltip": "Used only when zero_parallax is 'constant'; ignored by 'adaptive' and 'subject'. "
@@ -129,14 +139,6 @@ class StereoVideoSource:
                                "the depth range. 0 = unchanged, 0.25 = nearest 25% of the "
                                "range in front of the screen, 1 = entire range in front. "
                                "Does not change depth strength or depth_power."}),
-                "zero_parallax": (list(ZERO_PARALLAX_MODES), {
-                    "default": "constant",
-                    "tooltip": "Where the screen plane sits. constant (default): a fixed shift of constant_zero_parallax "
-                               "for the whole video. adaptive: at each scene change, the nearest 1% (p1) of that scene's "
-                               "depth is placed on the screen plane. subject: at each scene change, the most confident face "
-                               "is placed just behind the screen (falls back to adaptive when no face is found); needs a "
-                               "Face Detector Loader connected to StereoVideoConvert. adaptive and subject shift the scene "
-                               "without changing its depth, ignore constant_zero_parallax, and require Preview mode off."}),
             },
         }
 
@@ -161,11 +163,11 @@ class StereoVideoSource:
         audio_mode: str,
         depth_edge_refine_method: str = "none",
         depth_normalization_method: str = "simple",
-        global_depth_max: float = 850.0,
+        global_depth_max: float = 900.0,
         adaptive_depth_power: bool = True,
         adaptive_depth_max: float = 0.6,
         constant_zero_parallax: float = DEFAULTS.constant_zero_parallax,
-        zero_parallax: str = "constant",
+        zero_parallax: str = "adaptive",
     ):
         if depth_normalization_method not in ("simple", "global", "adaptive global"):
             raise ValueError("depth_normalization_method must be 'simple', 'global', or 'adaptive global'")

@@ -145,7 +145,7 @@ Builds the video job definition.
 > **Workflows saved before this change:** the float `zero_parallax` was renamed to `constant_zero_parallax`, and the `adaptive_zero_parallax` toggle was replaced by the `zero_parallax` dropdown. Re-set both widgets on `StereoVideoSource` in older workflows.
 - `invert_depth`: flips the inferred depth map
 - `depth_normalization_method`: `simple` uses per-frame min/max; `global` clamps depth to a fixed shared maximum; `adaptive global` uses the same hard clamp and gradually raises the maximum if the initial value is too low
-- `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `850`); frames whose p99 exceeds it produce a console warning
+- `global_depth_max`: initial depth ceiling for `global` and `adaptive global` modes (default `900`); frames whose p99 exceeds it produce a console warning
 - `audio_mode`: `copy` or `none`
 
 ### StereoVideoConvert
