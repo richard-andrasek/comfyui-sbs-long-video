@@ -187,7 +187,7 @@ def probe_video(path: str) -> VideoMetadata:
         "-show_format",
         resolved,
     ]
-    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    completed = subprocess.run(command, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
     payload = json.loads(completed.stdout)
     streams = payload.get("streams", [])
     video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
