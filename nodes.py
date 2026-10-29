@@ -315,7 +315,6 @@ class StereoVideoConvert:
                     scene_starts=job.scene_starts,
                     stride=job.every_nth,
                     face_detector=face_detector if job.zero_parallax == "subject" else None,
-                    fps=job.source_fps,
                 )
             with ExitStack() as stack:
                 source_decoder = stack.enter_context(FFmpegChunkDecoder(spec, chunk_size=job.chunk_size))

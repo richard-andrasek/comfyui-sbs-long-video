@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import math
 
 import torch
@@ -10,8 +9,6 @@ try:
 except ImportError:
     from depth_runner import finite_quantile, is_scene_start
 
-
-LOGGER = logging.getLogger(__name__)
 
 SCENE_Z_SHIFT_QUANTILE = 0.01  # p1 of normalized depth is placed on the screen plane for each scene.
 # Subject mode (zero_parallax = "subject"). Depths are in the renderer's curved 0-1 space.
@@ -74,11 +71,10 @@ class AdaptiveZeroParallax:
     falling back to p1 when no face is found. Both are pure shifts.
     """
 
-    def __init__(self, scene_starts: list[int], stride: int = 1, face_detector: SubjectFaceDetector | None = None, fps: float = 0.0):
+    def __init__(self, scene_starts: list[int], stride: int = 1, face_detector: SubjectFaceDetector | None = None):
         self.scene_starts = sorted(set(int(x) for x in scene_starts)) or [0]
         self.stride = max(1, int(stride))
         self.face_detector = face_detector
-        self.fps = float(fps)
         self.applied = 0.0
 
     def shifts(
@@ -109,7 +105,6 @@ class AdaptiveZeroParallax:
             return
         power = max(depth_power, 1e-3)  # same floor as the renderer
         p1_shift = min(1.0, max(0.0, p1)) ** power
-        where = f"Scene @ {frame_index}" + (f" ({frame_index / self.fps:.1f} s)" if self.fps > 0 else "")
 
         faces = []
         if self.face_detector is not None and frame_rgb_uint8 is not None:
@@ -119,20 +114,9 @@ class AdaptiveZeroParallax:
 
         if not math.isfinite(depth):
             self.applied = min(1.0, p1_shift)
-            if self.face_detector is None:
-                LOGGER.info("%s: p1 %.2f -> shift %.2f [adaptive]", where, p1, self.applied)
-            else:
-                LOGGER.info("%s: %d faces -> p1 %.2f -> shift %.2f [p1 fallback]", where, len(faces), p1, self.applied)
             return
 
         face_shift = min(1.0, max(0.0, depth)) ** power - SUBJECT_SCREEN_DEPTH
         max_shift = p1_shift + SUBJECT_MAX_POP_OUT  # pop-out guard: p1 at most SUBJECT_MAX_POP_OUT in front
         # Lower clamp: never move the scene away from the viewer.
         self.applied = min(1.0, max(0.0, min(face_shift, max_shift)))
-        capped = face_shift > max_shift
-        LOGGER.info(
-            "%s: %d face%s, chose highest score (h=%.2f, score=%.2f), face depth %.2f -> %s [%s]",
-            where, len(faces), "" if len(faces) == 1 else "s", face[3] / depth_1hw.shape[-2], face[4], depth,
-            f"pop-out guard limited shift {face_shift:.2f} -> {self.applied:.2f}" if capped else f"shift {self.applied:.2f}",
-            "subject, capped" if capped else "subject",
-        )
